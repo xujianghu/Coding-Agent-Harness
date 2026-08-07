@@ -136,3 +136,136 @@
 - "深度合并"这类模糊术语是冷启动 agent 的典型障碍——如果主 agent 和冷启动 agent 选择了不同策略，后续集成会出 bug
 - 跨 task 职责边界（配置 vs 凭据）在单 task 描述中加一句边界提示，成本极低但收益显著
 - TDD 红-绿循环在冷启动 agent 上同样有效：先写测试明确了预期行为，减少了"猜实现"的风险
+
+---
+
+## 2026-08-07 · Phase 4 · 实现·Harness 核心骨架
+
+### Task 4.1 · 项目脚手架（Task 1）
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 20:54 |
+| 触发技能 | 无（手动执行） |
+| Commit | `4364fb5` |
+| 操作 | 创建 15 个目录 → 写入 `package.json`/`tsconfig.json`/`vitest.config.ts`/`.gitignore`/`src/core/types.ts` → `npm install` → `tsc --noEmit` 通过 |
+| 人工干预 | 无 |
+
+### Task 4.2 · LLM 抽象层 + 配置系统（Task 2 + 3 并行）
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:00 |
+| 触发技能 | `dispatching-parallel-agents`（并行派发两个 subagent） |
+| 策略 | 两个独立 task 并行执行：Task 2（LLM 抽象层）和 Task 3（配置系统） |
+| Commit | `5b39587`（LLM）、`4e96473`（配置） |
+| 测试 | Mock LLM 4 tests + OpenAI 4 tests + Anthropic 5 tests + Gemini 6 tests + Config 8 tests = 27 tests PASS |
+| 人工干预 | 无。两个 subagent 均按 TDD 流程独立完成 |
+
+### Task 4.3-4.5 · 主循环 + 工具注册表 + 记忆存储 + 护栏引擎（4 并行）
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:05 |
+| 触发技能 | `dispatching-parallel-agents`（并行派发 4 个 subagent） |
+| 并行任务 | Task 4（主循环）、Task 5（工具注册表）、Task 10（记忆存储）、Task 12（护栏引擎） |
+| Commit | `818e28e`（主循环）、`be9121c`（注册表）、`19a52ed`（记忆）、`6b27b58`（护栏） |
+| 测试 | 7+5+5+5 = 22 tests，全量 49 tests PASS |
+| 人工干预 | 无 |
+
+### Task 4.6 · 工具实现 + 记忆检索 + HITL + 沙箱（7 并行）
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:10 |
+| 触发技能 | `dispatching-parallel-agents`（并行派发 7 个 subagent） |
+| 并行任务 | Task 6（文件）、Task 7（Shell）、Task 8+9（测试运行器+Lint）、Task 11（记忆检索）、Task 13（HITL）、Task 14（沙箱） |
+| Commit | `b1db214`、`5debe0d`、`53dcb18`、`794250b`、`ddf540d`、`445b687` |
+| 测试 | 全量 73 tests PASS |
+| 人工干预 | 无 |
+
+**教训：**
+- 7 个 subagent 并行派发是最激进的一次，但全部成功——前提是每个 task 的依赖关系已正确标注
+- `dispatching-parallel-agents` 技能在依赖图清晰的场景下效率极高：7 个 task 在 1 轮并行中完成，而非 7 轮串行
+
+---
+
+## 2026-08-07 · Phase 5-7 · 治理护栏 + 反馈闭环 + 深入
+
+### Task 5.1-5.3 · 护栏管道 + 反馈执行器 + 凭据管理（3 并行）
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:16 |
+| 触发技能 | `dispatching-parallel-agents` |
+| 并行任务 | Task 15（护栏管道）、Task 17（反馈执行器）、Task 20（凭据管理） |
+| Commit | `e1aa238`、`cf06bb7`、`877f65e` |
+| 测试 | 全量 84 tests PASS |
+| 人工干预 | 无 |
+
+### Task 5.4-5.5 · 审计日志 + 反馈解析器（2 并行）
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:20 |
+| 触发技能 | `dispatching-parallel-agents` |
+| 并行任务 | Task 16（审计日志）、Task 18（反馈解析器） |
+| Commit | `fc730e7`、`02267b2` |
+| 人工干预 | 无 |
+
+### Task 5.6-5.8 · 反馈回灌器 + CLI + 演示（3 并行）
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:23 |
+| 触发技能 | `dispatching-parallel-agents` |
+| 并行任务 | Task 19（反馈回灌器）、Task 21（CLI 入口）、Task 22-24（机制演示） |
+| Commit | `18549af`、`78c5a22`、`b9551f9` |
+| 人工干预 | 反馈回灌器测试格式不匹配（`All checks passed` vs `[LINT] PASSED`），手动修复测试断言 |
+| 教训 | 当多个 subagent 分别实现相互依赖的模块时，接口格式可能不一致，需要在集成阶段人工对齐 |
+
+---
+
+## 2026-08-07 · Phase 8-10 · 分发 + CI + 文档
+
+### Task 8.1-8.3 · Docker + CI + README（3 并行）
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:30 |
+| 触发技能 | `dispatching-parallel-agents` |
+| 并行任务 | Task 25（Dockerfile）、Task 26（CI 配置）、Task 27（README） |
+| Commit | `62b0bcc` |
+| 人工干预 | 无 |
+
+### 文档提交与 gitignore 整改
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:35 |
+| Commit | `1bde392`（编译修复）、`9e1fbc8`（文档+gitignore） |
+| 操作 | 修复 CLI 子任务引入的编译问题 → 提交 `package-lock.json` + 所有交付文档 → 更新 `.gitignore` 排除原始需求文档和 `GIT_PUSH_STRATEGY.md` |
+| 人工干预 | 用户要求排除无关文档，手动配置 `.gitignore` 规则 |
+
+### 推送到 GitHub
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 21:37 |
+| 操作 | `git push -u origin master` |
+| 远程 | `https://github.com/xujianghu/Coding-Agent-Harness.git` |
+| 推送 | 24 commits 全部推送成功 |
+
+---
+
+## 2026-08-07 · 最终验证
+
+| 指标 | 结果 |
+|------|------|
+| 单元测试 | **94 passed** / 22 files / 0 failed |
+| 编译 | `tsc --noEmit` 零错误 |
+| 演示脚本 | 演示① 10✅ / 演示② 11✅ / 演示③ 23✅ = 44✅ 0❌ |
+| Git 历史 | 24 commits，语义明确，每个 commit 对应一个独立功能模块 |
+| 无凭据泄露 | 已确认 |
+
+**总结：** 全部 27 个实现 task 通过并行 subagent 派发完成，从 Phase 4 到 Phase 10 共使用 5 轮并行派发（2→4→7→3→2→3），每轮均遵循 TDD 红-绿流程。核心机制全部可用 mock LLM 验证，无真实 LLM 依赖。
