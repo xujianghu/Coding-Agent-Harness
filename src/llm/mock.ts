@@ -7,7 +7,7 @@ export function createMockLLM(responses: LLMResponse[]): LLMProvider {
     name: 'mock',
     complete: async (_messages: Array<{ role: string; content: string }>) => {
       if (index >= responses.length) {
-        return { content: '' };
+        return { content: '[MOCK] No more preset responses available' };
       }
       const response = responses[index];
       index++;

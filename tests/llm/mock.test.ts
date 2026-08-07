@@ -20,7 +20,7 @@ describe('createMockLLM', () => {
     expect(result2.usage).toEqual({ promptTokens: 20, completionTokens: 10, totalTokens: 30 });
   });
 
-  it('should return empty string after all responses are exhausted', async () => {
+  it('should return explicit message after all responses are exhausted', async () => {
     const responses: LLMResponse[] = [
       { content: 'Only one' },
     ];
@@ -31,7 +31,7 @@ describe('createMockLLM', () => {
     expect(result1.content).toBe('Only one');
 
     const result2 = await mock.complete([{ role: 'user', content: 'Again' }]);
-    expect(result2.content).toBe('');
+    expect(result2.content).toBe('[MOCK] No more preset responses available');
   });
 
   it('should have the correct provider name', () => {
@@ -43,6 +43,6 @@ describe('createMockLLM', () => {
     const mock: LLMProvider = createMockLLM([]);
 
     const result = await mock.complete([{ role: 'user', content: 'Hi' }]);
-    expect(result.content).toBe('');
+    expect(result.content).toBe('[MOCK] No more preset responses available');
   });
 });

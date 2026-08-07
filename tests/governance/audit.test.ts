@@ -71,4 +71,37 @@ describe('AuditLogger', () => {
     expect(first.action.type).toBe('read_file');
     expect(second.action.type).toBe('write_file');
   });
+
+  it('should rotate log when file exceeds 10MB', () => {
+    const maxSize = 10 * 1024 * 1024;
+    const paddingSize = maxSize - 100 + 1;
+    const padding = 'x'.repeat(paddingSize);
+    const bigEntry = {
+      timestamp: 1700000000000,
+      action: { type: 'shell_exec', params: { command: 'test', padding } },
+      result: { allowed: true },
+    };
+
+    logger.log(bigEntry);
+
+    const smallEntry = {
+      timestamp: 1700000001000,
+      action: { type: 'read_file', params: { path: 'test.ts' } },
+      result: { allowed: true },
+    };
+    logger.log(smallEntry);
+
+    const backupPath = logPath + '.1';
+    expect(fs.existsSync(backupPath)).toBe(true);
+
+    const backupContent = fs.readFileSync(backupPath, 'utf-8').trim();
+    const backupEntry = JSON.parse(backupContent);
+    expect(backupEntry.action.type).toBe('shell_exec');
+
+    const currentContent = fs.readFileSync(logPath, 'utf-8').trim();
+    const currentEntry = JSON.parse(currentContent);
+    expect(currentEntry.action.type).toBe('read_file');
+
+    try { fs.unlinkSync(backupPath); } catch { /* ignore */ }
+  });
 });
