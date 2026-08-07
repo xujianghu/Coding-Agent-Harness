@@ -1,0 +1,7 @@
+node_modules/
+tests/
+demo/
+src/
+.git/
+.env
+*.key
