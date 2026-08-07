@@ -7,3 +7,9 @@ credentials.*
 .harness/*.log
 coverage/
 test-workspace/
+
+# 原始需求文档（非交付物）
+AI4SE_Final_Project_A_Coding_Agent_Harness.md
+AI4SE_Final_Project_*.md
+GIT_PUSH_STRATEGY.md
+通用要求.md
