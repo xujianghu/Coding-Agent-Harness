@@ -10,56 +10,56 @@ interface MemoryStore {
   delete(key: string): Promise<void>;
 }
 
-function safeFileName(key: string): string {
-  return key.replace(/[\/\\:*?"<>|]/g, '_') + '.json';
-}
-
 async function createMemoryStore(storagePath: string): Promise<MemoryStore> {
-  if (!existsSync(storagePath)) {
-    await mkdir(storagePath, { recursive: true });
+  await mkdir(storagePath, { recursive: true });
+  const filePath = path.join(storagePath, 'memory.json');
+
+  async function loadAll(): Promise<Record<string, MemoryEntry>> {
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      return JSON.parse(content);
+    } catch {
+      return {};
+    }
   }
 
-  return {
-    async set(key: string, value: string, category: MemoryEntry['category']): Promise<void> {
-      const entry: MemoryEntry = {
-        key,
-        value,
-        category,
-        timestamp: Date.now(),
-      };
-      const filePath = path.join(storagePath, safeFileName(key));
-      await writeFile(filePath, JSON.stringify(entry, null, 2), 'utf-8');
-    },
+  async function saveAll(data: Record<string, MemoryEntry>): Promise<void> {
+    await writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  }
 
-    async get(key: string): Promise<MemoryEntry | null> {
-      const filePath = path.join(storagePath, safeFileName(key));
-      if (!existsSync(filePath)) {
-        return null;
-      }
-      const content = await readFile(filePath, 'utf-8');
-      return JSON.parse(content) as MemoryEntry;
-    },
-
-    async list(): Promise<MemoryEntry[]> {
-      if (!existsSync(storagePath)) {
-        return [];
-      }
-      const entries: MemoryEntry[] = [];
-      const files = await readdir(storagePath);
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const content = await readFile(path.join(storagePath, file), 'utf-8');
-          entries.push(JSON.parse(content) as MemoryEntry);
+  async function migrateOldFiles(): Promise<void> {
+    if (!existsSync(storagePath)) return;
+    const files = await readdir(storagePath);
+    for (const file of files) {
+      if (file.endsWith('.json') && file !== 'memory.json') {
+        const oldPath = path.join(storagePath, file);
+        if (existsSync(oldPath)) {
+          await unlink(oldPath);
         }
       }
-      return entries;
-    },
+    }
+  }
 
-    async delete(key: string): Promise<void> {
-      const filePath = path.join(storagePath, safeFileName(key));
-      if (existsSync(filePath)) {
-        await unlink(filePath);
-      }
+  await migrateOldFiles();
+
+  return {
+    async set(key, value, category) {
+      const data = await loadAll();
+      data[key] = { key, value, category, timestamp: Date.now() };
+      await saveAll(data);
+    },
+    async get(key) {
+      const data = await loadAll();
+      return data[key] || null;
+    },
+    async list() {
+      const data = await loadAll();
+      return Object.values(data);
+    },
+    async delete(key) {
+      const data = await loadAll();
+      delete data[key];
+      await saveAll(data);
     },
   };
 }
