@@ -19,7 +19,7 @@ describe('MemoryStore', () => {
 
   describe('set 和 get', () => {
     it('写入并读取 → 返回正确的 key/value/category', async () => {
-      const store = createMemoryStore(storagePath);
+      const store = await createMemoryStore(storagePath);
 
       await store.set('coding-style', 'use tabs', 'convention');
       const entry = await store.get('coding-style');
@@ -32,7 +32,7 @@ describe('MemoryStore', () => {
     });
 
     it('不存在的 key 返回 null', async () => {
-      const store = createMemoryStore(storagePath);
+      const store = await createMemoryStore(storagePath);
 
       const entry = await store.get('non-existent-key');
 
@@ -42,7 +42,7 @@ describe('MemoryStore', () => {
 
   describe('list', () => {
     it('list 列出所有条目', async () => {
-      const store = createMemoryStore(storagePath);
+      const store = await createMemoryStore(storagePath);
 
       await store.set('convention-1', 'use spaces', 'convention');
       await store.set('decision-1', 'use vitest', 'decision');
@@ -58,10 +58,10 @@ describe('MemoryStore', () => {
 
   describe('持久化', () => {
     it('跨"会话"持久化（创建新 store 读取旧数据）', async () => {
-      const store1 = createMemoryStore(storagePath);
+      const store1 = await createMemoryStore(storagePath);
       await store1.set('persist-key', 'persist-value', 'decision');
 
-      const store2 = createMemoryStore(storagePath);
+      const store2 = await createMemoryStore(storagePath);
       const entry = await store2.get('persist-key');
 
       expect(entry).not.toBeNull();
@@ -73,7 +73,7 @@ describe('MemoryStore', () => {
 
   describe('delete', () => {
     it('删除条目后 get 返回 null', async () => {
-      const store = createMemoryStore(storagePath);
+      const store = await createMemoryStore(storagePath);
 
       await store.set('to-delete', 'will be removed', 'structure');
       const beforeDelete = await store.get('to-delete');

@@ -1,4 +1,5 @@
-import * as fs from 'fs';
+import { readFile, writeFile, readdir, unlink, mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 import * as path from 'path';
 import type { MemoryEntry } from '../core/types';
 
@@ -13,9 +14,9 @@ function safeFileName(key: string): string {
   return key.replace(/[\/\\:*?"<>|]/g, '_') + '.json';
 }
 
-function createMemoryStore(storagePath: string): MemoryStore {
-  if (!fs.existsSync(storagePath)) {
-    fs.mkdirSync(storagePath, { recursive: true });
+async function createMemoryStore(storagePath: string): Promise<MemoryStore> {
+  if (!existsSync(storagePath)) {
+    await mkdir(storagePath, { recursive: true });
   }
 
   return {
@@ -27,27 +28,27 @@ function createMemoryStore(storagePath: string): MemoryStore {
         timestamp: Date.now(),
       };
       const filePath = path.join(storagePath, safeFileName(key));
-      fs.writeFileSync(filePath, JSON.stringify(entry, null, 2), 'utf-8');
+      await writeFile(filePath, JSON.stringify(entry, null, 2), 'utf-8');
     },
 
     async get(key: string): Promise<MemoryEntry | null> {
       const filePath = path.join(storagePath, safeFileName(key));
-      if (!fs.existsSync(filePath)) {
+      if (!existsSync(filePath)) {
         return null;
       }
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const content = await readFile(filePath, 'utf-8');
       return JSON.parse(content) as MemoryEntry;
     },
 
     async list(): Promise<MemoryEntry[]> {
-      if (!fs.existsSync(storagePath)) {
+      if (!existsSync(storagePath)) {
         return [];
       }
       const entries: MemoryEntry[] = [];
-      const files = fs.readdirSync(storagePath);
+      const files = await readdir(storagePath);
       for (const file of files) {
         if (file.endsWith('.json')) {
-          const content = fs.readFileSync(path.join(storagePath, file), 'utf-8');
+          const content = await readFile(path.join(storagePath, file), 'utf-8');
           entries.push(JSON.parse(content) as MemoryEntry);
         }
       }
@@ -56,8 +57,8 @@ function createMemoryStore(storagePath: string): MemoryStore {
 
     async delete(key: string): Promise<void> {
       const filePath = path.join(storagePath, safeFileName(key));
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      if (existsSync(filePath)) {
+        await unlink(filePath);
       }
     },
   };

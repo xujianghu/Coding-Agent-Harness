@@ -10,7 +10,7 @@ describe('MemoryRetriever', () => {
 
   beforeEach(async () => {
     storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-retriever-test-'));
-    const store = createMemoryStore(storagePath);
+    const store = await createMemoryStore(storagePath);
 
     await store.set('coding-style', 'use tabs for indentation', 'convention');
     await store.set('test-framework', 'use vitest for testing', 'decision');
@@ -26,7 +26,7 @@ describe('MemoryRetriever', () => {
   });
 
   it('关键词检索匹配 → 返回包含 query 的条目', async () => {
-    const store = createMemoryStore(storagePath);
+    const store = await createMemoryStore(storagePath);
     const retriever = createMemoryRetriever(store);
 
     const results = await retriever.search('vitest');
@@ -37,7 +37,7 @@ describe('MemoryRetriever', () => {
   });
 
   it('按分类过滤 → 只返回指定 category 的条目', async () => {
-    const store = createMemoryStore(storagePath);
+    const store = await createMemoryStore(storagePath);
     const retriever = createMemoryRetriever(store);
 
     const results = await retriever.search('use', { category: 'convention' });
@@ -47,7 +47,7 @@ describe('MemoryRetriever', () => {
   });
 
   it('无匹配结果返回空数组', async () => {
-    const store = createMemoryStore(storagePath);
+    const store = await createMemoryStore(storagePath);
     const retriever = createMemoryRetriever(store);
 
     const results = await retriever.search('nonexistent');
