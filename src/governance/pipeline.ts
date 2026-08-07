@@ -14,42 +14,77 @@ export function createGovernancePipeline(
 ): GovernancePipeline {
   return {
     process(action: AgentAction): PipelineResult {
-      if (action.type !== 'shell_exec') {
-        return { allowed: true, pipelineStages: ['precheck'] };
-      }
+      switch (action.type) {
+        case 'shell_exec': {
+          const guardrailResult = guardrail.evaluate(action);
+          if (!guardrailResult.allowed) {
+            return {
+              allowed: false,
+              reason: guardrailResult.reason,
+              requiresApproval: guardrailResult.requiresApproval,
+              pipelineStages: ['guardrail'],
+            };
+          }
 
-      const guardrailResult = guardrail.evaluate(action);
-      if (!guardrailResult.allowed) {
-        return {
-          allowed: false,
-          reason: guardrailResult.reason,
-          requiresApproval: guardrailResult.requiresApproval,
-          pipelineStages: ['guardrail'],
-        };
-      }
+          const sandboxResult = sandbox.checkCommand(action.params.command);
+          if (!sandboxResult.allowed) {
+            return {
+              allowed: false,
+              reason: sandboxResult.reason,
+              pipelineStages: ['guardrail', 'sandbox'],
+            };
+          }
 
-      const sandboxResult = sandbox.checkCommand(action.params.command);
-      if (!sandboxResult.allowed) {
-        return {
-          allowed: false,
-          reason: sandboxResult.reason,
-          pipelineStages: ['guardrail', 'sandbox'],
-        };
-      }
+          if (guardrailResult.requiresApproval) {
+            hitl.requestApproval(action);
+            return {
+              allowed: false,
+              requiresApproval: true,
+              pipelineStages: ['guardrail', 'sandbox', 'hitl'],
+            };
+          }
 
-      if (guardrailResult.requiresApproval) {
-        hitl.requestApproval(action);
-        return {
-          allowed: false,
-          requiresApproval: true,
-          pipelineStages: ['guardrail', 'sandbox', 'hitl'],
-        };
-      }
+          return {
+            allowed: true,
+            pipelineStages: ['guardrail', 'sandbox', 'audit'],
+          };
+        }
 
-      return {
-        allowed: true,
-        pipelineStages: ['guardrail', 'sandbox'],
-      };
+        case 'write_file':
+        case 'read_file': {
+          const sandboxResult = sandbox.checkPath(action.params.path);
+          if (!sandboxResult.allowed) {
+            return {
+              allowed: false,
+              reason: sandboxResult.reason,
+              pipelineStages: ['sandbox'],
+            };
+          }
+          return {
+            allowed: true,
+            pipelineStages: ['sandbox', 'audit'],
+          };
+        }
+
+        case 'run_test':
+        case 'run_lint': {
+          const sandboxResult = sandbox.checkCommand(action.params.command);
+          if (!sandboxResult.allowed) {
+            return {
+              allowed: false,
+              reason: sandboxResult.reason,
+              pipelineStages: ['sandbox'],
+            };
+          }
+          return {
+            allowed: true,
+            pipelineStages: ['sandbox', 'audit'],
+          };
+        }
+
+        default:
+          return { allowed: true, pipelineStages: ['precheck'] };
+      }
     },
   };
 }
