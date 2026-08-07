@@ -125,7 +125,7 @@ program
       llm = await createLLMProvider(config.llm, credManager);
     }
 
-    const memoryStore = createMemoryStore(join(workspace, config.memory.storagePath));
+    const memoryStore = await createMemoryStore(join(workspace, config.memory.storagePath));
     const memoryRetriever = createMemoryRetriever(memoryStore);
 
     const agent = createAgentLoop(config, llm, registry.list(), {
