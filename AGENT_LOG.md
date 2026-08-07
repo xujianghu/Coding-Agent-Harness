@@ -269,3 +269,68 @@
 | 无凭据泄露 | 已确认 |
 
 **总结：** 全部 27 个实现 task 通过并行 subagent 派发完成，从 Phase 4 到 Phase 10 共使用 5 轮并行派发（2→4→7→3→2→3），每轮均遵循 TDD 红-绿流程。核心机制全部可用 mock LLM 验证，无真实 LLM 依赖。
+
+---
+
+## 2026-08-07 · P0 架构缺陷修复（基于 OPTIMIZATION_PLAN.md）
+
+### 审查结论
+
+OPTIMIZATION_PLAN.md 提出的 28 条优化项经逐条对照源码验证，**四个 P0 缺陷全部真实存在**。修复方案可行，按 TDD 流程逐一修复。
+
+### P0-1 · LLM Provider 工厂路由
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 23:45 |
+| 触发技能 | `subagent-driven-development`（TDD 流程） |
+| Commit | `40670eb` |
+| 问题 | CLI 硬编码 MockLLM，三个真实适配器已实现但从未接入 |
+| 修复 | 新增 `src/llm/factory.ts` + CLI 添加 `--mock` 参数 |
+| 测试 | 9 tests PASS，覆盖 mock/openai/anthropic/gemini 四种路由 + 错误处理 |
+| 人工干预 | 无 |
+
+### P0-4 · 消息历史裁剪
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 23:47 |
+| Commit | `4f5a064` |
+| 问题 | `maxConversationTurns` 从未使用，消息数组无限增长 |
+| 修复 | 新增 `trimConversationHistory` 函数，每轮迭代后裁剪 |
+| 测试 | 新增 4 tests，全量 13 tests PASS |
+| 人工干预 | 无 |
+
+### P0-3 · 治理管道全覆盖
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 23:50 |
+| Commit | `657d58b` |
+| 问题 | 非 shell_exec 动作绕过所有安全检查 |
+| 修复 | 将 `if (action.type !== 'shell_exec')` 短路替换为 switch 分支 |
+| 测试 | 7 tests PASS，覆盖 shell_exec/write_file/read_file/run_test/run_lint |
+| 人工干预 | 无 |
+
+### P0-2 · 标准 Tool-Use 协议支持
+
+| 项目 | 详情 |
+|------|------|
+| 时间 | 2026-08-07 23:59 |
+| Commit | `30aeae8` |
+| 问题 | parseResponse 只支持自创 JSON 格式，不支持 OpenAI tool_calls / Anthropic tool_use |
+| 修复 | LLMResponse 扩展 toolCalls 字段，三个适配器提取原生格式，parseResponse 优先处理 toolCalls |
+| 测试 | 新增 9 tests，全量 122 tests PASS。向后兼容现有 JSON 格式 |
+| 人工干预 | 无 |
+
+### 最终验证
+
+| 指标 | 优化前 | 优化后 |
+|------|--------|--------|
+| 单元测试 | 94 | **122** |
+| 测试文件 | 22 | **23** |
+| 编译 | 零错误 | 零错误 |
+| 演示脚本 | 44✅ | 44✅（无回归） |
+| Git 提交 | 24 | **28** |
+
+**P0 优化总结：** 四个架构缺陷全部修复，真实 LLM 可通过工厂路由接入，标准 Tool-Use 协议已支持，治理管道覆盖所有动作类型，消息历史自动裁剪。项目从"概念演示"升级到"可用原型"。
