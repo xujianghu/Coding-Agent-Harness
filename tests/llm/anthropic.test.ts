@@ -110,4 +110,55 @@ describe('createAnthropicProvider', () => {
     expect(result.content).toBe('No usage');
     expect(result.usage).toBeUndefined();
   });
+
+  it('should extract tool_use blocks from Anthropic response', async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [
+        { type: 'text', text: 'Let me read that file.' },
+        { type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: '/src/app.ts' } },
+        { type: 'tool_use', id: 'toolu_2', name: 'shell_exec', input: { command: 'echo hello' } },
+      ],
+      usage: { input_tokens: 15, output_tokens: 8 },
+    });
+
+    const provider: LLMProvider = createAnthropicProvider({
+      apiKey: 'test-key',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    const result = await provider.complete([
+      { role: 'user', content: 'Read the file' },
+    ]);
+
+    expect(result.content).toBe('Let me read that file.');
+    expect(result.toolCalls).toBeDefined();
+    expect(result.toolCalls!.length).toBe(2);
+    expect(result.toolCalls![0]).toEqual({
+      name: 'read_file',
+      arguments: { path: '/src/app.ts' },
+    });
+    expect(result.toolCalls![1]).toEqual({
+      name: 'shell_exec',
+      arguments: { command: 'echo hello' },
+    });
+  });
+
+  it('should handle response without tool_use blocks', async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'No tools here' }],
+      usage: { input_tokens: 5, output_tokens: 3 },
+    });
+
+    const provider: LLMProvider = createAnthropicProvider({
+      apiKey: 'test-key',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    const result = await provider.complete([
+      { role: 'user', content: 'Hi' },
+    ]);
+
+    expect(result.content).toBe('No tools here');
+    expect(result.toolCalls).toBeUndefined();
+  });
 });

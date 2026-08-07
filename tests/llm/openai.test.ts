@@ -98,4 +98,70 @@ describe('createOpenAIProvider', () => {
       ],
     });
   });
+
+  it('should extract tool_calls from OpenAI response', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: '',
+          tool_calls: [{
+            id: 'call_1',
+            type: 'function',
+            function: {
+              name: 'read_file',
+              arguments: '{"path":"/src/app.ts"}',
+            },
+          }, {
+            id: 'call_2',
+            type: 'function',
+            function: {
+              name: 'shell_exec',
+              arguments: '{"command":"echo hello"}',
+            },
+          }],
+        },
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+
+    const provider: LLMProvider = createOpenAIProvider({
+      apiKey: 'test-key',
+      model: 'gpt-4o',
+    });
+
+    const result = await provider.complete([
+      { role: 'user', content: 'Read the file' },
+    ]);
+
+    expect(result.content).toBe('');
+    expect(result.toolCalls).toBeDefined();
+    expect(result.toolCalls!.length).toBe(2);
+    expect(result.toolCalls![0]).toEqual({
+      name: 'read_file',
+      arguments: { path: '/src/app.ts' },
+    });
+    expect(result.toolCalls![1]).toEqual({
+      name: 'shell_exec',
+      arguments: { command: 'echo hello' },
+    });
+  });
+
+  it('should handle response without tool_calls', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: 'No tools here' } }],
+      usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+    });
+
+    const provider: LLMProvider = createOpenAIProvider({
+      apiKey: 'test-key',
+      model: 'gpt-4o',
+    });
+
+    const result = await provider.complete([
+      { role: 'user', content: 'Hi' },
+    ]);
+
+    expect(result.content).toBe('No tools here');
+    expect(result.toolCalls).toBeUndefined();
+  });
 });

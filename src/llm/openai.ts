@@ -22,6 +22,13 @@ export function createOpenAIProvider(config: {
 
       const result: LLMResponse = { content };
 
+      if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0) {
+        result.toolCalls = choice.message.tool_calls.map((tc) => ({
+          name: tc.function.name,
+          arguments: JSON.parse(tc.function.arguments),
+        }));
+      }
+
       if (response.usage) {
         result.usage = {
           promptTokens: response.usage.prompt_tokens,

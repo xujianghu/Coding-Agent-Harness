@@ -48,6 +48,20 @@ export function createGeminiProvider(config: {
 
       const llmResponse: LLMResponse = { content };
 
+      const candidate = response.candidates?.[0];
+      const parts = candidate?.content?.parts;
+      if (parts) {
+        const functionCalls = parts
+          .filter((p: any) => p.functionCall)
+          .map((p: any) => ({
+            name: p.functionCall.name,
+            arguments: p.functionCall.args as Record<string, string>,
+          }));
+        if (functionCalls.length > 0) {
+          llmResponse.toolCalls = functionCalls;
+        }
+      }
+
       if (response.usageMetadata) {
         llmResponse.usage = {
           promptTokens: response.usageMetadata.promptTokenCount,

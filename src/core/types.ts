@@ -79,6 +79,10 @@ export interface AgentConfig {
 
 export interface LLMResponse {
   content: string;
+  toolCalls?: Array<{
+    name: string;
+    arguments: Record<string, string>;
+  }>;
   usage?: {
     promptTokens: number;
     completionTokens: number;

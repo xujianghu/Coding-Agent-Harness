@@ -7,6 +7,7 @@ import {
   ConversationTurn,
   ToolDefinition,
   LLMResponse,
+  LLMProvider,
 } from '../../src/core/types';
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -227,7 +228,90 @@ describe('createAgentLoop', () => {
   });
 });
 
-describe('trimConversationHistory', () => {
+describe('标准 Tool-Use 协议解析', () => {
+    it('10. LLMResponse 含 toolCalls → 正确解析为 AgentAction 并分发', async () => {
+      const llmResponse: LLMResponse = {
+        content: '',
+        toolCalls: [{
+          name: 'shell_exec',
+          arguments: { command: 'echo from tool_calls' },
+        }],
+      };
+      const responses: LLMResponse[] = [
+        llmResponse,
+        { content: '' },
+      ];
+      const mockLLM = createMockLLM(responses);
+
+      const onAction = vi.fn();
+      const onTurn = vi.fn();
+      const loop = createAgentLoop(makeConfig(), mockLLM, [makeShellTool()], {
+        onAction,
+        onTurn,
+      });
+
+      const result = await loop.run('run echo');
+
+      expect(onAction).toHaveBeenCalledTimes(1);
+      const calledAction: AgentAction = onAction.mock.calls[0][0];
+      expect(calledAction.type).toBe('shell_exec');
+      expect(calledAction.params).toEqual({ command: 'echo from tool_calls' });
+
+      expect(onTurn).toHaveBeenCalledTimes(1);
+      const turn: ConversationTurn = onTurn.mock.calls[0][0];
+      expect(turn.action).toBeDefined();
+      expect(turn.action!.type).toBe('shell_exec');
+      expect(turn.result).toBeDefined();
+      expect(turn.result!.success).toBe(true);
+      expect(turn.result!.output).toBe('executed: echo from tool_calls');
+    });
+
+    it('11. LLMResponse 仅含 content（无 toolCalls）→ 保持现有 JSON 解析行为', async () => {
+      const actionPayload = { action: { type: 'shell_exec', params: { command: 'echo fallback' } } };
+      const responses: LLMResponse[] = [
+        { content: JSON.stringify(actionPayload) },
+        { content: '' },
+      ];
+      const mockLLM = createMockLLM(responses);
+
+      const onAction = vi.fn();
+      const loop = createAgentLoop(makeConfig(), mockLLM, [makeShellTool()], { onAction });
+
+      await loop.run('run echo');
+
+      expect(onAction).toHaveBeenCalledTimes(1);
+      const calledAction: AgentAction = onAction.mock.calls[0][0];
+      expect(calledAction.type).toBe('shell_exec');
+      expect(calledAction.params).toEqual({ command: 'echo fallback' });
+    });
+
+    it('12. toolCalls 与 content 都存在 → 优先使用 toolCalls', async () => {
+      const llmResponse: LLMResponse = {
+        content: JSON.stringify({ action: { type: 'shell_exec', params: { command: 'from json' } } }),
+        toolCalls: [{
+          name: 'shell_exec',
+          arguments: { command: 'from tool_calls' },
+        }],
+      };
+      const responses: LLMResponse[] = [
+        llmResponse,
+        { content: '' },
+      ];
+      const mockLLM = createMockLLM(responses);
+
+      const onAction = vi.fn();
+      const loop = createAgentLoop(makeConfig(), mockLLM, [makeShellTool()], { onAction });
+
+      await loop.run('run echo');
+
+      expect(onAction).toHaveBeenCalledTimes(1);
+      const calledAction: AgentAction = onAction.mock.calls[0][0];
+      expect(calledAction.type).toBe('shell_exec');
+      expect(calledAction.params).toEqual({ command: 'from tool_calls' });
+    });
+  });
+
+  describe('trimConversationHistory', () => {
   it('消息数在限制内 → 不裁剪', () => {
     const messages = [
       { role: 'system', content: 'system prompt' },

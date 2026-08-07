@@ -34,7 +34,12 @@ Available tools:
 ${toolList}`;
 }
 
-function parseResponse(content: string): { action?: AgentAction; done?: boolean; summary?: string } | null {
+function parseResponse(content: string, toolCalls?: Array<{ name: string; arguments: Record<string, string> }>): { action?: AgentAction; done?: boolean; summary?: string } | null {
+  if (toolCalls && toolCalls.length > 0) {
+    const tc = toolCalls[0];
+    return { action: { type: tc.name as AgentAction['type'], params: tc.arguments } };
+  }
+
   const trimmed = content.trim();
   if (!trimmed) return null;
 
@@ -125,13 +130,13 @@ export function createAgentLoop(
         const response = await llm.complete(messages);
         turns++;
 
-        if (!response.content || response.content.trim() === '') {
+        if ((!response.content || response.content.trim() === '') && (!response.toolCalls || response.toolCalls.length === 0)) {
           state = 'completed';
           callbacks.onStop?.('empty response');
           break;
         }
 
-        const parsed = parseResponse(response.content);
+        const parsed = parseResponse(response.content, response.toolCalls);
 
         if (!parsed) {
           state = 'completed';

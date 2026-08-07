@@ -42,6 +42,14 @@ export function createAnthropicProvider(config: {
 
       const result: LLMResponse = { content };
 
+      const toolUseBlocks = response.content.filter((c) => c.type === 'tool_use');
+      if (toolUseBlocks.length > 0) {
+        result.toolCalls = toolUseBlocks.map((tu) => ({
+          name: tu.name,
+          arguments: tu.input as Record<string, string>,
+        }));
+      }
+
       if (response.usage) {
         result.usage = {
           promptTokens: response.usage.input_tokens,
