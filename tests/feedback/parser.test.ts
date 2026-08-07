@@ -3,9 +3,58 @@ import { parseTestOutput, parseLintOutput } from '../../src/feedback/parser';
 import type { FeedbackSignal } from '../../src/core/types';
 
 describe('parseTestOutput', () => {
+  it('exitCode=0 → passed=true（即使输出含 "fail" 字样）', () => {
+    const output = 'Running tests...\n  ✗ test1 failed\n  ✗ test2\n\nTests: 0 passed, 2 failed, 2 total';
+    const signal = parseTestOutput(output, 0);
+
+    expect(signal.type).toBe('test');
+    expect(signal.passed).toBe(true);
+    expect(signal.summary).toContain('passed');
+    expect(signal.details).toEqual([]);
+  });
+
+  it('exitCode=1 → passed=false', () => {
+    const output = 'Running tests...\n  ✓ test1\n  ✓ test2\n\nTests: 2 passed, 2 total';
+    const signal = parseTestOutput(output, 1);
+
+    expect(signal.type).toBe('test');
+    expect(signal.passed).toBe(false);
+    expect(signal.summary).toContain('failed');
+    expect(signal.details).toEqual([]);
+  });
+
+  it('无 exitCode 时用正则降级：输出含 "2 failed" → passed=false', () => {
+    const output = 'Running tests...\n  ✓ test1\n  ✗ test2\n  ✗ test3\n\nTests: 1 passed, 2 failed, 3 total';
+    const signal = parseTestOutput(output);
+
+    expect(signal.type).toBe('test');
+    expect(signal.passed).toBe(false);
+    expect(signal.summary).toContain('failed');
+    expect(signal.details).toEqual([]);
+  });
+
+  it('无 exitCode 时输出含 "0 failures" → passed=true', () => {
+    const output = 'Running tests...\n  ✓ test1\n  ✓ test2\n\nTest Suites: 1 passed, 1 total\nTests: 0 failures, 2 passed, 2 total';
+    const signal = parseTestOutput(output);
+
+    expect(signal.type).toBe('test');
+    expect(signal.passed).toBe(true);
+    expect(signal.summary).toContain('passed');
+    expect(signal.details).toEqual([]);
+  });
+
+  it('无 exitCode 时输出含 "failures" 但不匹配 "(\\d+)\\s+failed" → passed=true', () => {
+    const output = 'Tests completed with failures=0\nAll tests passed';
+    const signal = parseTestOutput(output);
+
+    expect(signal.type).toBe('test');
+    expect(signal.passed).toBe(true);
+    expect(signal.summary).toContain('passed');
+  });
+
   it('解析测试通过输出 → passed=true, summary 含 "passed"', () => {
     const output = 'Running tests...\n  ✓ test1\n  ✓ test2\n\nTest Suites: 1 passed, 1 total\nTests: 2 passed, 2 total';
-    const signal: FeedbackSignal = parseTestOutput(output);
+    const signal = parseTestOutput(output);
 
     expect(signal.type).toBe('test');
     expect(signal.passed).toBe(true);
@@ -15,7 +64,7 @@ describe('parseTestOutput', () => {
 
   it('解析测试失败输出（含 "2 failed"）→ passed=false, summary 含 "failed"', () => {
     const output = 'Running tests...\n  ✓ test1\n  ✗ test2\n  ✗ test3\n\nTests: 1 passed, 2 failed, 3 total';
-    const signal: FeedbackSignal = parseTestOutput(output);
+    const signal = parseTestOutput(output);
 
     expect(signal.type).toBe('test');
     expect(signal.passed).toBe(false);

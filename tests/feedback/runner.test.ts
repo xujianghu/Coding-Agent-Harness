@@ -19,7 +19,7 @@ describe('createFeedbackRunner', () => {
     const signal = await runner.runTest('exit 1');
     expect(signal.type).toBe('test');
     expect(signal.passed).toBe(false);
-    expect(signal.summary).toBe('1 tests failed');
+    expect(signal.summary).toBe('Tests failed');
   });
 
   it('执行 lint 命令时解析输出中的 file:line:message 模式', async () => {

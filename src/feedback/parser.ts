@@ -1,24 +1,32 @@
 import type { FeedbackSignal } from '../core/types';
 
-export function parseTestOutput(output: string): FeedbackSignal {
-  const failPattern = /\b(fail|failed|failing)\b/i;
-  const passed = !failPattern.test(output);
+export function parseTestOutput(output: string, exitCode?: number): FeedbackSignal {
+  if (exitCode !== undefined) {
+    const passed = exitCode === 0;
+    let summary: string;
+    if (passed) {
+      const testMatch = output.match(/(\d+)\s+passed/);
+      summary = testMatch ? `${testMatch[1]} tests passed` : 'All tests passed';
+    } else {
+      const failMatch = output.match(/(\d+)\s+failed/i);
+      summary = failMatch ? `${failMatch[1]} tests failed` : 'Tests failed';
+    }
+    return { type: 'test', passed, details: [], summary };
+  }
+
+  const failPattern = /(\d+)\s+failed/i;
+  const failMatch = output.match(failPattern);
+  const passed = !failMatch;
 
   let summary: string;
   if (!passed) {
-    const failMatch = output.match(/(\d+)\s+failed/);
-    summary = failMatch ? `${failMatch[1]} tests failed` : 'Tests failed';
+    summary = `${failMatch[1]} tests failed`;
   } else {
     const testMatch = output.match(/(\d+)\s+passed/);
     summary = testMatch ? `${testMatch[1]} tests passed` : 'All tests passed';
   }
 
-  return {
-    type: 'test',
-    passed,
-    details: [],
-    summary,
-  };
+  return { type: 'test', passed, details: [], summary };
 }
 
 export function parseLintOutput(output: string): FeedbackSignal {
@@ -26,7 +34,7 @@ export function parseLintOutput(output: string): FeedbackSignal {
   const lines = output.split('\n');
 
   for (const line of lines) {
-    const trimmed = line.trim();
+    const trimmed = line.trim().replace(/^"/, '').replace(/"$/, '');
     if (!trimmed) continue;
 
     const match = trimmed.match(/^(.+?):(\d+):(\d+):\s+(.+)$/);
