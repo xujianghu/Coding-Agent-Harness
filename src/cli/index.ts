@@ -25,6 +25,32 @@ import * as readline from 'readline';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
+function hiddenPrompt(query: string): Promise<string> {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    const stdout = process.stdout;
+    stdout.write(query);
+    stdin.setRawMode(true);
+    stdin.resume();
+    let input = '';
+    stdin.on('data', (chunk: Buffer) => {
+      const char = chunk.toString();
+      if (char === '\r' || char === '\n') {
+        stdout.write('\n');
+        stdin.setRawMode(false);
+        stdin.pause();
+        resolve(input);
+      } else if (char === '\x7f') {
+        input = input.slice(0, -1);
+        stdout.write('\b \b');
+      } else {
+        input += char;
+        stdout.write('*');
+      }
+    });
+  });
+}
+
 const program = new Command();
 
 program
@@ -166,16 +192,16 @@ program
           console.error('Please specify a valid provider: openai, anthropic, or gemini');
           process.exit(1);
         }
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
-        const key = await new Promise<string>((resolve) => {
-          rl.question(`Enter API key for ${provider}: `, (answer: string) => {
-            resolve(answer.trim());
-          });
-        });
-        rl.close();
+        const key = await hiddenPrompt(`Enter API key for ${provider}: `);
+        if (!key) {
+          console.error('API key cannot be empty.');
+          process.exit(1);
+        }
+        const confirm = await hiddenPrompt(`Confirm API key for ${provider}: `);
+        if (key !== confirm) {
+          console.error('Keys do not match. Please try again.');
+          process.exit(1);
+        }
         await credManager.set(provider, key);
         console.log(`API key for ${provider} saved.`);
         break;
