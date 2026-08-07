@@ -1,4 +1,5 @@
 import { AgentAction } from '../core/types';
+import * as readline from 'readline';
 
 export interface HITLStateMachine {
   requestApproval(action: AgentAction): void;
@@ -7,6 +8,7 @@ export interface HITLStateMachine {
   getState(): 'idle' | 'pending' | 'approved' | 'rejected';
   getPendingAction(): AgentAction | null;
   getRejectReason(): string | null;
+  requestInteractiveApproval(action: AgentAction): Promise<boolean>;
 }
 
 export function createHITL(): HITLStateMachine {
@@ -45,6 +47,30 @@ export function createHITL(): HITLStateMachine {
 
     getRejectReason() {
       return rejectReason;
+    },
+
+    async requestInteractiveApproval(action: AgentAction): Promise<boolean> {
+      this.requestApproval(action);
+
+      console.log(`\n[HITL] Action requires approval:`);
+      console.log(`  Type: ${action.type}`);
+      console.log(`  Params: ${JSON.stringify(action.params)}`);
+
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise<string>((resolve) => {
+        rl.question('Approve? (y/N): ', resolve);
+      });
+      rl.close();
+
+      if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+        this.approve();
+        console.log('[HITL] Approved');
+        return true;
+      } else {
+        this.reject('User denied');
+        console.log('[HITL] Rejected');
+        return false;
+      }
     },
   };
 }

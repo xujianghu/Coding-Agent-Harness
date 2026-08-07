@@ -129,7 +129,7 @@ program
     const memoryRetriever = createMemoryRetriever(memoryStore);
 
     const agent = createAgentLoop(config, llm, registry.list(), {
-      onAction: (action: AgentAction, turn: number) => {
+      onAction: async (action: AgentAction, turn: number) => {
         console.log(`[Turn ${turn}] Action: ${action.type}`, JSON.stringify(action.params));
         const result = pipeline.process(action);
         audit.log({
@@ -142,10 +142,14 @@ program
           },
         });
         if (!result.allowed) {
-          console.log(`  Guardrail blocked: ${result.reason}`);
           if (result.requiresApproval) {
-            console.log(`  HITL status: approval required`);
+            const approved = await hitl.requestInteractiveApproval(action);
+            if (approved) {
+              return { allowed: true };
+            }
+            return { allowed: false, reason: 'User denied approval' };
           }
+          console.log(`  Guardrail blocked: ${result.reason}`);
         }
         return { allowed: result.allowed, reason: result.reason };
       },

@@ -118,7 +118,7 @@ export interface AgentRunResult {
 }
 
 export interface AgentCallbacks {
-  onAction?: (action: AgentAction, turn: number) => { allowed: boolean; reason?: string } | void;
+  onAction?: (action: AgentAction, turn: number) => { allowed: boolean; reason?: string } | void | Promise<{ allowed: boolean; reason?: string } | void>;
   onTurn?: (turn: ConversationTurn) => void;
   onStop?: (reason: string) => void;
 }
@@ -182,7 +182,7 @@ export function createAgentLoop(
           if (parsed.action) {
             const action = parsed.action;
 
-            const approval = callbacks.onAction?.(action, turns);
+            const approval = await callbacks.onAction?.(action, turns);
             if (approval && !approval.allowed) {
               const blockedResult: ActionResult = {
                 success: false,
