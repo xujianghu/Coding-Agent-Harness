@@ -90,6 +90,39 @@ describe('createAgentLoop', () => {
       expect(result.summary).toBe('All tasks completed successfully');
       expect(result.turns).toBe(1);
     });
+
+    it('13. 第一次解析失败 → 发送格式修正提示，继续循环', async () => {
+      const firstResponse = { content: 'not valid json at all' };
+      const secondResponse = { content: JSON.stringify({ done: true, summary: 'recovered' }) };
+      const responses: LLMResponse[] = [firstResponse, secondResponse];
+      const mockLLM = createMockLLM(responses);
+
+      const onStop = vi.fn();
+      const loop = createAgentLoop(makeConfig(), mockLLM, [makeShellTool()], { onStop });
+
+      const result = await loop.run('do something');
+
+      expect(onStop).not.toHaveBeenCalledWith('unparseable response');
+      expect(result.state).toBe('completed');
+      expect(result.summary).toBe('recovered');
+      expect(result.turns).toBe(2);
+    });
+
+    it('14. 第二次解析仍失败 → 停机', async () => {
+      const firstResponse = { content: 'not valid json' };
+      const secondResponse = { content: 'still not valid json' };
+      const responses: LLMResponse[] = [firstResponse, secondResponse];
+      const mockLLM = createMockLLM(responses);
+
+      const onStop = vi.fn();
+      const loop = createAgentLoop(makeConfig(), mockLLM, [makeShellTool()], { onStop });
+
+      const result = await loop.run('do something');
+
+      expect(onStop).toHaveBeenCalledWith('unparseable response');
+      expect(result.state).toBe('completed');
+      expect(result.turns).toBe(2);
+    });
   });
 
   describe('动作解析与回调', () => {
@@ -189,6 +222,33 @@ describe('createAgentLoop', () => {
       expect(result.history.length).toBeGreaterThanOrEqual(2);
       expect(result.history[0].role).toBe('user');
       expect(result.history[0].content).toBe('list files');
+    });
+  });
+
+  describe('超时控制', () => {
+    it('正常完成 → 不受超时影响', async () => {
+      const responses: LLMResponse[] = [
+        { content: JSON.stringify({ done: true, summary: 'completed' }) },
+      ];
+      const mockLLM = createMockLLM(responses);
+      const config = makeConfig({ agent: { maxTurns: 10, timeout: 5000 } });
+      const loop = createAgentLoop(config, mockLLM, [makeShellTool()], {});
+
+      const result = await loop.run('do something');
+
+      expect(result.state).toBe('completed');
+      expect(result.summary).toBe('completed');
+    });
+
+    it('超时后 → 抛出错误 "Agent timed out"', async () => {
+      const hangingLLM: LLMProvider = {
+        name: 'hanging',
+        complete: () => new Promise(() => {}),
+      };
+      const config = makeConfig({ agent: { maxTurns: 100, timeout: 100 } });
+      const loop = createAgentLoop(config, hangingLLM, [makeShellTool()], {});
+
+      await expect(loop.run('do something')).rejects.toThrow('Agent timed out');
     });
   });
 

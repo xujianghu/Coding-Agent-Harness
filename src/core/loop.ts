@@ -131,101 +131,117 @@ export function createAgentLoop(
 ) {
   return {
     async run(task: string): Promise<AgentRunResult> {
-      const history: ConversationTurn[] = [];
-      const systemPrompt = buildSystemPrompt(tools);
-      let messages = buildInitialMessages(task, systemPrompt);
+      const timeout = config.agent.timeout;
+      const runPromise = (async () => {
+        const history: ConversationTurn[] = [];
+        const systemPrompt = buildSystemPrompt(tools);
+        let messages = buildInitialMessages(task, systemPrompt);
 
-      history.push({
-        role: 'user',
-        content: task,
-        timestamp: Date.now(),
-      });
+        history.push({
+          role: 'user',
+          content: task,
+          timestamp: Date.now(),
+        });
 
-      let turns = 0;
-      let summary = '';
-      let state: AgentState = 'running';
-      const maxTurns = config.agent.maxTurns;
+        let turns = 0;
+        let summary = '';
+        let state: AgentState = 'running';
+        const maxTurns = config.agent.maxTurns;
+        let parseAttempts = 0;
 
-      while (!checkStopCondition(turns, maxTurns)) {
-        const response = await llm.complete(messages);
-        turns++;
+        while (!checkStopCondition(turns, maxTurns)) {
+          const response = await llm.complete(messages);
+          turns++;
 
-        if ((!response.content || response.content.trim() === '') && (!response.toolCalls || response.toolCalls.length === 0)) {
-          state = 'completed';
-          callbacks.onStop?.('empty response');
-          break;
-        }
+          if ((!response.content || response.content.trim() === '') && (!response.toolCalls || response.toolCalls.length === 0)) {
+            state = 'completed';
+            callbacks.onStop?.('empty response');
+            break;
+          }
 
-        const parsed = parseResponse(response.content, response.toolCalls);
+          const parsed = parseResponse(response.content, response.toolCalls);
 
-        if (!parsed) {
-          state = 'completed';
-          callbacks.onStop?.('unparseable response');
-          break;
-        }
+          if (!parsed) {
+            if (parseAttempts === 0) {
+              parseAttempts++;
+              messages.push({ role: 'user', content: 'Your response was not in the expected JSON format. Please respond with valid JSON.' });
+              continue;
+            }
+            state = 'completed';
+            callbacks.onStop?.('unparseable response');
+            break;
+          }
 
-        if (parsed.done) {
-          summary = parsed.summary || '';
-          state = 'completed';
-          callbacks.onStop?.('done signal');
-          break;
-        }
+          if (parsed.done) {
+            summary = parsed.summary || '';
+            state = 'completed';
+            callbacks.onStop?.('done signal');
+            break;
+          }
 
-        if (parsed.action) {
-          const action = parsed.action;
+          if (parsed.action) {
+            const action = parsed.action;
 
-          const approval = callbacks.onAction?.(action, turns);
-          if (approval && !approval.allowed) {
-            const blockedResult: ActionResult = {
-              success: false,
-              output: '',
-              error: approval.reason || 'Action blocked',
-            };
+            const approval = callbacks.onAction?.(action, turns);
+            if (approval && !approval.allowed) {
+              const blockedResult: ActionResult = {
+                success: false,
+                output: '',
+                error: approval.reason || 'Action blocked',
+              };
+
+              const turn: ConversationTurn = {
+                role: 'assistant',
+                content: response.content,
+                timestamp: Date.now(),
+                action,
+                result: blockedResult,
+              };
+
+              history.push(turn);
+              callbacks.onTurn?.(turn);
+
+              messages.push({ role: 'assistant', content: response.content });
+              messages.push({
+                role: 'feedback',
+                content: `Action blocked: ${approval.reason || 'not allowed'}`,
+              });
+              messages = trimConversationHistory(messages, config.memory.maxConversationTurns);
+              continue;
+            }
+
+            const result = await executeAction(tools, action);
 
             const turn: ConversationTurn = {
               role: 'assistant',
               content: response.content,
               timestamp: Date.now(),
               action,
-              result: blockedResult,
+              result,
             };
 
             history.push(turn);
             callbacks.onTurn?.(turn);
 
-            messages.push({ role: 'assistant', content: response.content });
-            messages.push({
-              role: 'feedback',
-              content: `Action blocked: ${approval.reason || 'not allowed'}`,
-            });
+            appendTurnMessages(messages, response.content, result);
             messages = trimConversationHistory(messages, config.memory.maxConversationTurns);
-            continue;
           }
-
-          const result = await executeAction(tools, action);
-
-          const turn: ConversationTurn = {
-            role: 'assistant',
-            content: response.content,
-            timestamp: Date.now(),
-            action,
-            result,
-          };
-
-          history.push(turn);
-          callbacks.onTurn?.(turn);
-
-          appendTurnMessages(messages, response.content, result);
-          messages = trimConversationHistory(messages, config.memory.maxConversationTurns);
         }
-      }
 
-      if (state === 'running') {
-        state = 'stopped';
-        callbacks.onStop?.('maxTurns reached');
-      }
+        if (state === 'running') {
+          state = 'stopped';
+          callbacks.onStop?.('maxTurns reached');
+        }
 
-      return { state, turns, summary, history };
+        return { state, turns, summary, history };
+      })();
+
+      return Promise.race([
+        runPromise,
+        new Promise<AgentRunResult>((_, reject) =>
+          setTimeout(() => reject(new Error(`Agent timed out after ${timeout}ms`)), timeout)
+        ),
+      ]);
     },
   };
 }

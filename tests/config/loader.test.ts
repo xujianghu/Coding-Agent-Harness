@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -167,6 +167,23 @@ llm:
       const config = loadConfig(nonExistentPath);
 
       expect(config).toEqual(DefaultConfig);
+    });
+  });
+
+  describe('YAML 解析失败时回退到默认配置', () => {
+    it('应返回默认配置并输出 console.warn 警告', () => {
+      const warningSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const configPath = path.join(tmpDir, 'invalid.yaml');
+      writeYaml(configPath, 'invalid: yaml: : syntax: error');
+
+      const config = loadConfig(configPath);
+
+      expect(config).toEqual(DefaultConfig);
+      expect(warningSpy).toHaveBeenCalled();
+      expect(warningSpy.mock.calls[0][0]).toContain('配置解析失败');
+      expect(warningSpy.mock.calls[0][0]).toContain('默认配置');
+
+      warningSpy.mockRestore();
     });
   });
 });

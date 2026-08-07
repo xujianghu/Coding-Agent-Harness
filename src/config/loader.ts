@@ -57,7 +57,15 @@ export function loadConfig(filePath: string): AgentConfig {
   }
 
   const raw = fs.readFileSync(filePath, 'utf-8');
-  const parsed = yaml.parse(raw) as Partial<AgentConfig>;
+  let parsed: Partial<AgentConfig> | null;
+  try {
+    parsed = yaml.parse(raw) as Partial<AgentConfig>;
+  } catch (e) {
+    console.warn(
+      `配置解析失败: ${filePath}。YAML 格式错误，将回退到默认配置。错误详情: ${(e as Error).message}`,
+    );
+    return { ...DefaultConfig };
+  }
 
   if (!parsed || typeof parsed !== 'object') {
     return { ...DefaultConfig };
