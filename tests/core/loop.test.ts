@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createAgentLoop } from '../../src/core/loop';
+import { createAgentLoop, trimConversationHistory } from '../../src/core/loop';
 import { createMockLLM } from '../../src/llm/mock';
 import {
   AgentConfig,
@@ -189,5 +189,121 @@ describe('createAgentLoop', () => {
       expect(result.history[0].role).toBe('user');
       expect(result.history[0].content).toBe('list files');
     });
+  });
+
+  describe('消息历史裁剪', () => {
+    it('8. 消息数在限制内 → 不裁剪', async () => {
+      const actionPayload = { action: { type: 'shell_exec', params: { command: 'ls' } } };
+      const responses: LLMResponse[] = [
+        { content: JSON.stringify(actionPayload) },
+        { content: JSON.stringify({ done: true, summary: 'done' }) },
+      ];
+      const mockLLM = createMockLLM(responses);
+      const config = makeConfig({ memory: { storagePath: '', maxConversationTurns: 100 } });
+      const loop = createAgentLoop(config, mockLLM, [makeShellTool()], {});
+
+      const result = await loop.run('list files');
+
+      expect(result.history.length).toBeGreaterThanOrEqual(2);
+      expect(result.state).toBe('completed');
+    });
+
+    it('9. 消息数超过限制 → 裁剪到 maxTurns*2+2 条，保留 system + 首条 user', async () => {
+      const actionPayload = { action: { type: 'shell_exec', params: { command: 'ls' } } };
+      const responses: LLMResponse[] = Array(20).fill({ content: JSON.stringify(actionPayload) });
+      const mockLLM = createMockLLM(responses);
+      const config = makeConfig({
+        agent: { maxTurns: 20, timeout: 60000 },
+        memory: { storagePath: '', maxConversationTurns: 3 },
+      });
+      const onStop = vi.fn();
+      const loop = createAgentLoop(config, mockLLM, [makeShellTool()], { onStop });
+
+      const result = await loop.run('list files');
+
+      expect(result.state).toBe('stopped');
+      expect(result.turns).toBe(20);
+    });
+  });
+});
+
+describe('trimConversationHistory', () => {
+  it('消息数在限制内 → 不裁剪', () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+      { role: 'assistant', content: 'action1' },
+      { role: 'feedback', content: 'result1' },
+      { role: 'assistant', content: 'action2' },
+      { role: 'feedback', content: 'result2' },
+    ];
+
+    const result = trimConversationHistory(messages, 3);
+
+    expect(result).toEqual(messages);
+    expect(result.length).toBe(6);
+  });
+
+  it('消息数超过限制 → 裁剪到 maxTurns*2+2 条', () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'task' },
+      { role: 'assistant', content: 'old1' },
+      { role: 'feedback', content: 'old_r1' },
+      { role: 'assistant', content: 'old2' },
+      { role: 'feedback', content: 'old_r2' },
+      { role: 'assistant', content: 'recent1' },
+      { role: 'feedback', content: 'recent_r1' },
+      { role: 'assistant', content: 'recent2' },
+      { role: 'feedback', content: 'recent_r2' },
+    ];
+
+    const result = trimConversationHistory(messages, 2);
+
+    expect(result.length).toBe(6);
+    expect(result[0]).toEqual({ role: 'system', content: 'system prompt' });
+    expect(result[1]).toEqual({ role: 'user', content: 'task' });
+    expect(result[2]).toEqual({ role: 'assistant', content: 'recent1' });
+    expect(result[3]).toEqual({ role: 'feedback', content: 'recent_r1' });
+    expect(result[4]).toEqual({ role: 'assistant', content: 'recent2' });
+    expect(result[5]).toEqual({ role: 'feedback', content: 'recent_r2' });
+  });
+
+  it('裁剪后 system prompt 仍然是第一条', () => {
+    const messages = [
+      { role: 'system', content: 'you are a bot' },
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'a1' },
+      { role: 'feedback', content: 'f1' },
+      { role: 'assistant', content: 'a2' },
+      { role: 'feedback', content: 'f2' },
+      { role: 'assistant', content: 'a3' },
+      { role: 'feedback', content: 'f3' },
+      { role: 'assistant', content: 'a4' },
+      { role: 'feedback', content: 'f4' },
+    ];
+
+    const result = trimConversationHistory(messages, 1);
+
+    expect(result[0].role).toBe('system');
+    expect(result[0].content).toBe('you are a bot');
+  });
+
+  it('裁剪后首条 user 消息保留', () => {
+    const messages = [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'original task' },
+      { role: 'assistant', content: 'a1' },
+      { role: 'feedback', content: 'f1' },
+      { role: 'assistant', content: 'a2' },
+      { role: 'feedback', content: 'f2' },
+      { role: 'assistant', content: 'a3' },
+      { role: 'feedback', content: 'f3' },
+    ];
+
+    const result = trimConversationHistory(messages, 1);
+
+    expect(result[1].role).toBe('user');
+    expect(result[1].content).toBe('original task');
   });
 });

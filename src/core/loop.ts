@@ -71,6 +71,17 @@ function executeAction(tools: ToolDefinition[], action: AgentAction): Promise<Ac
   return tool.execute(action.params);
 }
 
+export function trimConversationHistory(
+  messages: Array<{ role: string; content: string }>,
+  maxTurns: number
+): Array<{ role: string; content: string }> {
+  const maxMessages = maxTurns * 2 + 2;
+  if (messages.length <= maxMessages) {
+    return messages;
+  }
+  return [...messages.slice(0, 2), ...messages.slice(-(maxTurns * 2))];
+}
+
 export interface AgentRunResult {
   state: AgentState;
   turns: number;
@@ -94,7 +105,7 @@ export function createAgentLoop(
     async run(task: string): Promise<AgentRunResult> {
       const history: ConversationTurn[] = [];
       const systemPrompt = buildSystemPrompt(tools);
-      const messages: Array<{ role: string; content: string }> = [
+      let messages: Array<{ role: string; content: string }> = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: task },
       ];
@@ -162,6 +173,7 @@ export function createAgentLoop(
               role: 'feedback',
               content: `Action blocked: ${approval.reason || 'not allowed'}`,
             });
+            messages = trimConversationHistory(messages, config.memory.maxConversationTurns);
             continue;
           }
 
@@ -183,6 +195,7 @@ export function createAgentLoop(
             role: 'feedback',
             content: `Action result: ${JSON.stringify(result)}`,
           });
+          messages = trimConversationHistory(messages, config.memory.maxConversationTurns);
         }
       }
 
