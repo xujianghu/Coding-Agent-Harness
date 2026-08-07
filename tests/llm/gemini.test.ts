@@ -155,4 +155,68 @@ describe('createGeminiProvider', () => {
       model: 'gemini-2.5-flash',
     });
   });
+
+  it('should extract functionCall from Gemini response', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: {
+        text: () => '',
+        candidates: [{
+          content: {
+            parts: [{
+              functionCall: {
+                name: 'read_file',
+                args: { path: '/src/app.ts' },
+              },
+            }],
+          },
+        }],
+        usageMetadata: {
+          promptTokenCount: 10,
+          candidatesTokenCount: 5,
+          totalTokenCount: 15,
+        },
+      },
+    });
+
+    const provider: LLMProvider = createGeminiProvider({
+      apiKey: 'test-key',
+      model: 'gemini-2.5-flash',
+    });
+
+    const result = await provider.complete([
+      { role: 'user', content: 'Read the file' },
+    ]);
+
+    expect(result.toolCalls).toBeDefined();
+    expect(result.toolCalls!.length).toBe(1);
+    expect(result.toolCalls![0]).toEqual({
+      name: 'read_file',
+      arguments: { path: '/src/app.ts' },
+    });
+  });
+
+  it('should handle response without functionCall', async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      response: {
+        text: () => 'No function call here',
+        usageMetadata: {
+          promptTokenCount: 5,
+          candidatesTokenCount: 3,
+          totalTokenCount: 8,
+        },
+      },
+    });
+
+    const provider: LLMProvider = createGeminiProvider({
+      apiKey: 'test-key',
+      model: 'gemini-2.5-flash',
+    });
+
+    const result = await provider.complete([
+      { role: 'user', content: 'Hi' },
+    ]);
+
+    expect(result.content).toBe('No function call here');
+    expect(result.toolCalls).toBeUndefined();
+  });
 });
