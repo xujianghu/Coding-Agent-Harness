@@ -1,0 +1,29 @@
+rules:
+  - name: "禁止递归删除根目录"
+    pattern: "rm\\s+-rf\\s+/"
+    severity: critical
+    action: block
+  - name: "禁止 force push"
+    pattern: "git\\s+push\\s+.*--force"
+    severity: critical
+    action: block
+  - name: "禁止硬重置"
+    pattern: "git\\s+reset\\s+--hard"
+    severity: critical
+    action: block
+  - name: "禁止管道执行远程脚本"
+    pattern: "curl.*\\|.*bash"
+    severity: critical
+    action: block
+  - name: "禁止危险权限修改"
+    pattern: "chmod\\s+777"
+    severity: critical
+    action: block
+  - name: "sudo 需审批"
+    pattern: "sudo"
+    severity: high
+    action: approve
+  - name: "沙箱路径限制"
+    type: sandbox
+    severity: high
+    action: block

@@ -1,0 +1,27 @@
+llm:
+  provider: openai
+  model: gpt-4o
+  maxTokens: 4096
+  temperature: 0.1
+agent:
+  maxTurns: 50
+  timeout: 300000
+governance:
+  rulesFile: .harness/guardrails.yaml
+  sandbox:
+    allowedPaths:
+      - ./workspace
+      - ./src
+      - ./tests
+    allowedCommands:
+      - npm
+      - node
+      - npx
+      - tsc
+      - eslint
+      - vitest
+      - jest
+      - git
+memory:
+  storagePath: .harness/memory/
+  maxConversationTurns: 20
