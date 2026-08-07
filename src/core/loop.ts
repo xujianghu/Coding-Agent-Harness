@@ -34,6 +34,29 @@ Available tools:
 ${toolList}`;
 }
 
+function buildInitialMessages(task: string, systemPrompt: string): Array<{ role: string; content: string }> {
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: task },
+  ];
+}
+
+function checkStopCondition(turns: number, maxTurns: number): boolean {
+  return turns >= maxTurns;
+}
+
+function appendTurnMessages(
+  messages: Array<{ role: string; content: string }>,
+  response: string,
+  result: { success: boolean; output?: string; error?: string }
+): void {
+  messages.push({ role: 'assistant', content: response });
+  messages.push({
+    role: 'feedback',
+    content: `Action result: ${JSON.stringify(result)}`,
+  });
+}
+
 function parseResponse(content: string, toolCalls?: Array<{ name: string; arguments: Record<string, string> }>): { action?: AgentAction; done?: boolean; summary?: string } | null {
   if (toolCalls && toolCalls.length > 0) {
     const tc = toolCalls[0];
@@ -110,10 +133,7 @@ export function createAgentLoop(
     async run(task: string): Promise<AgentRunResult> {
       const history: ConversationTurn[] = [];
       const systemPrompt = buildSystemPrompt(tools);
-      let messages: Array<{ role: string; content: string }> = [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: task },
-      ];
+      let messages = buildInitialMessages(task, systemPrompt);
 
       history.push({
         role: 'user',
@@ -126,7 +146,7 @@ export function createAgentLoop(
       let state: AgentState = 'running';
       const maxTurns = config.agent.maxTurns;
 
-      while (turns < maxTurns) {
+      while (!checkStopCondition(turns, maxTurns)) {
         const response = await llm.complete(messages);
         turns++;
 
@@ -195,11 +215,7 @@ export function createAgentLoop(
           history.push(turn);
           callbacks.onTurn?.(turn);
 
-          messages.push({ role: 'assistant', content: response.content });
-          messages.push({
-            role: 'feedback',
-            content: `Action result: ${JSON.stringify(result)}`,
-          });
+          appendTurnMessages(messages, response.content, result);
           messages = trimConversationHistory(messages, config.memory.maxConversationTurns);
         }
       }
