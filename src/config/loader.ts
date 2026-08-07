@@ -27,11 +27,11 @@ export const DefaultConfig: AgentConfig = {
   },
 };
 
-function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
-  const result = { ...target };
-  for (const key of Object.keys(source) as (keyof T)[]) {
-    const sourceVal = source[key];
-    const targetVal = target[key];
+function deepMerge<T extends object>(target: T, source: Partial<T>): T {
+  const result = { ...target } as Record<string, unknown>;
+  for (const key of Object.keys(source as Record<string, unknown>)) {
+    const sourceVal = (source as Record<string, unknown>)[key];
+    const targetVal = (target as Record<string, unknown>)[key];
     if (
       sourceVal !== null &&
       typeof sourceVal === 'object' &&
@@ -40,15 +40,15 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
       typeof targetVal === 'object' &&
       !Array.isArray(targetVal)
     ) {
-      (result as Record<string, unknown>)[key as string] = deepMerge(
+      result[key] = deepMerge(
         targetVal as Record<string, unknown>,
         sourceVal as Record<string, unknown>,
       );
     } else {
-      (result as Record<string, unknown>)[key as string] = sourceVal;
+      result[key] = sourceVal;
     }
   }
-  return result;
+  return result as T;
 }
 
 export function loadConfig(filePath: string): AgentConfig {

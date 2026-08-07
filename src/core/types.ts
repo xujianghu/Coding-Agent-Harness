@@ -17,6 +17,13 @@ export interface GuardrailResult {
   requiresApproval?: boolean;
 }
 
+export interface PipelineResult {
+  allowed: boolean;
+  reason?: string;
+  requiresApproval?: boolean;
+  pipelineStages: string[];
+}
+
 export interface FeedbackSignal {
   type: 'test' | 'lint' | 'typecheck' | 'guardrail';
   passed: boolean;

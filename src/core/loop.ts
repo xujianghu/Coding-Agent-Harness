@@ -4,10 +4,8 @@ import {
   ActionResult,
   ConversationTurn,
   AgentState,
-  AgentRunResult,
   LLMProvider,
   ToolDefinition,
-  AgentCallbacks,
 } from './types';
 
 function buildSystemPrompt(tools: ToolDefinition[]): string {
