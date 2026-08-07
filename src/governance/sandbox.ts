@@ -1,8 +1,25 @@
-import { resolve, sep } from 'path';
+import { resolve, sep, basename } from 'path';
 
 export interface Sandbox {
   checkPath(path: string): { allowed: boolean; reason?: string };
   checkCommand(command: string): { allowed: boolean; reason?: string };
+}
+
+function splitCommands(command: string): string[] {
+  const parts = command.split(/\s*(&&|\|\||[;|])\s*/);
+  return parts.filter((p) => p.trim() && !['&&', '||', ';', '|'].includes(p));
+}
+
+function extractCommandName(cmd: string): string | null {
+  if (/\$\(/.test(cmd) || /`/.test(cmd)) {
+    return null;
+  }
+  const trimmed = cmd.trim();
+  const firstWord = trimmed.split(/\s+/)[0];
+  if (firstWord.includes('/') || firstWord.includes('\\')) {
+    return basename(firstWord);
+  }
+  return firstWord;
 }
 
 export function createSandbox(
@@ -27,11 +44,18 @@ export function createSandbox(
       if (!trimmed) {
         return { allowed: false, reason: 'Empty command is not allowed' };
       }
-      const firstWord = trimmed.split(/\s+/)[0];
-      if (allowedCommands.includes(firstWord)) {
-        return { allowed: true };
+      if (/\$\(/.test(trimmed) || /`/.test(trimmed)) {
+        return { allowed: false, reason: 'Command substitution is not allowed' };
       }
-      return { allowed: false, reason: `Command "${firstWord}" is not in the allowed list` };
+      const subCommands = splitCommands(trimmed);
+      for (const subCmd of subCommands) {
+        const cmdName = extractCommandName(subCmd);
+        if (!cmdName || !allowedCommands.includes(cmdName)) {
+          const displayName = cmdName || subCmd.trim().split(/\s+/)[0];
+          return { allowed: false, reason: `Command "${displayName}" is not in the allowed list` };
+        }
+      }
+      return { allowed: true };
     },
   };
 }
