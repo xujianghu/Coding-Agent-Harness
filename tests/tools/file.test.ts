@@ -49,4 +49,67 @@ describe('FileTools', () => {
     const fileContent = readFileSync(filePath, 'utf-8');
     expect(fileContent).toBe('persisted data');
   });
+
+  describe('writeFileTool 参数校验', () => {
+    it('路径为空返回错误', async () => {
+      const result = await writeTool.execute({ path: '', content: 'some content' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('Path is required');
+    });
+
+    it('写入 .env 文件被拦截', async () => {
+      const result = await writeTool.execute({ path: '.env', content: 'SECRET=123' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('Sensitive path');
+    });
+
+    it('写入 .git/config 文件被拦截', async () => {
+      const result = await writeTool.execute({ path: '.git/config', content: 'fake config' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('Sensitive path');
+    });
+
+    it('写入 .harness/credentials/ 下文件被拦截', async () => {
+      const result = await writeTool.execute({ path: '.harness/credentials/token.json', content: '{}' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('Sensitive path');
+    });
+
+    it('写入 *.key 文件被拦截', async () => {
+      const result = await writeTool.execute({ path: 'private.key', content: 'key content' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('Sensitive path');
+    });
+
+    it('写入超过 1MB 的内容返回错误', async () => {
+      const largeContent = 'x'.repeat(1 * 1024 * 1024 + 1);
+
+      const result = await writeTool.execute({ path: 'large.txt', content: largeContent });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('exceeds max');
+    });
+
+    it('正常写入小文件成功', async () => {
+      const result = await writeTool.execute({ path: 'normal.txt', content: 'hello world' });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toBe('File written');
+
+      const filePath = join(workspaceRoot, 'normal.txt');
+      const fileContent = readFileSync(filePath, 'utf-8');
+      expect(fileContent).toBe('hello world');
+    });
+  });
 });
