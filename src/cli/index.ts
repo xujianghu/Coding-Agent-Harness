@@ -16,6 +16,7 @@ import { GuardrailRule } from '../governance/rules';
 import { createMemoryStore } from '../memory/store';
 import { createMemoryRetriever } from '../memory/retriever';
 import { createMockLLM } from '../llm/mock';
+import { createLLMProvider } from '../llm/factory';
 import { createAgentLoop } from '../core/loop';
 import { createCredentialManager } from '../credential/manager';
 import { AgentAction, ConversationTurn } from '../core/types';
@@ -36,7 +37,8 @@ program
   .description('Execute a coding task')
   .option('-c, --config <path>', 'Config file path', '.harness/config.yaml')
   .option('-w, --workspace <path>', 'Workspace root path', process.cwd())
-  .action(async (task: string, options: { config: string; workspace: string }) => {
+  .option('-m, --mock', 'Use mock LLM provider instead of real API')
+  .action(async (task: string, options: { config: string; workspace: string; mock: boolean }) => {
     const configPath = options.config;
     const workspace = options.workspace;
 
@@ -79,21 +81,28 @@ program
     const credStatus = await credManager.status();
     console.log(`Credentials: ${credStatus[config.llm.provider] ? 'configured' : 'not configured'}`);
 
-    const mockLLM = createMockLLM([
-      {
-        content: `\`\`\`json\n{"action": {"type": "read_file", "params": {"path": "package.json"}}}\n\`\`\``,
-        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
-      },
-      {
-        content: `\`\`\`json\n{"done": true, "summary": "Task completed successfully"}\n\`\`\``,
-        usage: { promptTokens: 200, completionTokens: 30, totalTokens: 230 },
-      },
-    ]);
+    let llm;
+    if (options.mock) {
+      console.log('Using mock LLM provider');
+      llm = createMockLLM([
+        {
+          content: `\`\`\`json\n{"action": {"type": "read_file", "params": {"path": "package.json"}}}\n\`\`\``,
+          usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+        },
+        {
+          content: `\`\`\`json\n{"done": true, "summary": "Task completed successfully"}\n\`\`\``,
+          usage: { promptTokens: 200, completionTokens: 30, totalTokens: 230 },
+        },
+      ]);
+    } else {
+      console.log(`Connecting to ${config.llm.provider}...`);
+      llm = await createLLMProvider(config.llm, credManager);
+    }
 
     const memoryStore = createMemoryStore(join(workspace, config.memory.storagePath));
     const memoryRetriever = createMemoryRetriever(memoryStore);
 
-    const agent = createAgentLoop(config, mockLLM, registry.list(), {
+    const agent = createAgentLoop(config, llm, registry.list(), {
       onAction: (action: AgentAction, turn: number) => {
         console.log(`[Turn ${turn}] Action: ${action.type}`, JSON.stringify(action.params));
         const result = pipeline.process(action);
