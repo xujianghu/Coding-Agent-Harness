@@ -103,7 +103,10 @@ program
 
     const audit = createAuditLogger(join(workspace, '.harness/audit.log'));
 
-    const credManager = createCredentialManager(join(workspace, '.harness/credentials'));
+    const credManager = createCredentialManager(
+      join(workspace, '.harness/credentials'),
+      process.env.HARNESS_MASTER_PASSWORD,
+    );
     const credStatus = await credManager.status();
     console.log(`Credentials: ${credStatus[config.llm.provider] ? 'configured' : 'not configured'}`);
 
@@ -179,7 +182,10 @@ program
   .command('key <action> [provider]')
   .description('Manage API keys')
   .action(async (action: string, provider: string) => {
-    const credManager = createCredentialManager(join(process.cwd(), '.harness/credentials'));
+    const credManager = createCredentialManager(
+      join(process.cwd(), '.harness/credentials'),
+      process.env.HARNESS_MASTER_PASSWORD,
+    );
     const validProviders = ['openai', 'anthropic', 'gemini'];
 
     switch (action) {
