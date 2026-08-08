@@ -14,7 +14,7 @@ export function parseTestOutput(output: string, exitCode?: number): FeedbackSign
     return { type: 'test', passed, details: [], summary };
   }
 
-  const failPattern = /(\d+)\s+failed/i;
+  const failPattern = /(\d+)\s+(?:tests?\s+)?failed/i;
   const failMatch = output.match(failPattern);
   const passed = !failMatch;
 
