@@ -8,6 +8,10 @@ import type { GuardrailRule } from '../src/governance/rules';
 import type { AgentAction } from '../src/core/types';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const logPath = path.join(__dirname, '.temp-audit-03.log');
 const results: string[] = [];
