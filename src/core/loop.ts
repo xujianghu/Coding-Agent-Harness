@@ -121,6 +121,7 @@ export interface AgentCallbacks {
   onAction?: (action: AgentAction, turn: number) => { allowed: boolean; reason?: string } | void | Promise<{ allowed: boolean; reason?: string } | void>;
   onTurn?: (turn: ConversationTurn) => void;
   onStop?: (reason: string) => void;
+  onMessage?: (messages: Array<{ role: string; content: string }>) => void;
 }
 
 export function createAgentLoop(
@@ -150,6 +151,7 @@ export function createAgentLoop(
         let parseAttempts = 0;
 
         while (!checkStopCondition(turns, maxTurns)) {
+          callbacks.onMessage?.(messages);
           const response = await llm.complete(messages);
           turns++;
 

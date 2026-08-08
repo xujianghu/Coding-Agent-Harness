@@ -22,7 +22,7 @@ import { createCredentialManager } from '../credential/manager';
 import { AgentAction, ConversationTurn } from '../core/types';
 import { parse } from 'yaml';
 import * as readline from 'readline';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 function hiddenPrompt(query: string): Promise<string> {
@@ -51,6 +51,66 @@ function hiddenPrompt(query: string): Promise<string> {
   });
 }
 
+const DEFAULT_CONFIG_YAML = `llm:
+  provider: openai
+  model: gpt-4o
+  maxTokens: 4096
+  temperature: 0.1
+
+agent:
+  maxTurns: 50
+  timeout: 300000
+
+governance:
+  rulesFile: .harness/guardrails.yaml
+  sandbox:
+    allowedPaths:
+      - ./workspace
+      - ./src
+      - ./tests
+    allowedCommands:
+      - npm
+      - node
+      - npx
+      - tsc
+      - eslint
+      - vitest
+      - jest
+      - git
+
+memory:
+  storagePath: .harness/memory/
+  maxConversationTurns: 20
+`;
+
+const DEFAULT_GUARDRAILS_YAML = `rules:
+  - name: no-destructive-commands
+    pattern: "rm -rf|rm -r|del /f|format"
+    severity: critical
+    action: block
+    type: command
+  - name: no-env-file-access
+    pattern: "\\\\.env"
+    severity: high
+    action: block
+    type: file
+  - name: no-system-directory-write
+    pattern: "^/(etc|sys|proc|dev)/"
+    severity: high
+    action: block
+    type: file
+  - name: no-package-lock-write
+    pattern: "package-lock\\\\.json"
+    severity: medium
+    action: approve
+    type: file
+  - name: no-git-config-write
+    pattern: "\\\\.git/config"
+    severity: critical
+    action: block
+    type: file
+`;
+
 const program = new Command();
 
 program
@@ -64,9 +124,13 @@ program
   .option('-c, --config <path>', 'Config file path', '.harness/config.yaml')
   .option('-w, --workspace <path>', 'Workspace root path', process.cwd())
   .option('-m, --mock', 'Use mock LLM provider instead of real API')
-  .action(async (task: string, options: { config: string; workspace: string; mock: boolean }) => {
+  .option('-v, --verbose', 'Print full prompt and response')
+  .option('--dry-run', 'Plan actions without executing them')
+  .action(async (task: string, options: { config: string; workspace: string; mock: boolean; verbose: boolean; dryRun: boolean }) => {
     const configPath = options.config;
     const workspace = options.workspace;
+    const verbose = options.verbose;
+    const dryRun = options.dryRun;
 
     console.log('Loading config...');
     const config = loadConfig(configPath);
@@ -133,7 +197,18 @@ program
 
     const agent = createAgentLoop(config, llm, registry.list(), {
       onAction: async (action: AgentAction, turn: number) => {
-        console.log(`[Turn ${turn}] Action: ${action.type}`, JSON.stringify(action.params));
+        if (verbose) {
+          console.log(`[Turn ${turn}] Action: ${action.type}`, JSON.stringify(action.params));
+        }
+
+        if (dryRun) {
+          console.log(`  Would execute: ${action.type} ${JSON.stringify(action.params)}`);
+          return { allowed: false, reason: 'Dry-run mode' };
+        }
+
+        if (!verbose) {
+          console.log(`[Turn ${turn}] Action: ${action.type}`, JSON.stringify(action.params));
+        }
         const result = pipeline.process(action);
         audit.log({
           timestamp: Date.now(),
@@ -159,6 +234,9 @@ program
       onTurn: (turn: ConversationTurn) => {
         if (turn.result) {
           console.log(`  Result: ${turn.result.success ? 'success' : 'failed'}`);
+          if (verbose && turn.result.output) {
+            console.log(`  Output: ${turn.result.output}`);
+          }
           if (turn.result.error) {
             console.log(`  Error: ${turn.result.error}`);
           }
@@ -166,6 +244,15 @@ program
       },
       onStop: (reason: string) => {
         console.log(`Stop reason: ${reason}`);
+      },
+      onMessage: (messages: Array<{ role: string; content: string }>) => {
+        if (verbose) {
+          console.log('\n--- Messages sent to LLM ---');
+          for (const msg of messages) {
+            console.log(`[${msg.role}]: ${msg.content}`);
+          }
+          console.log('--- End of messages ---\n');
+        }
       },
     });
 
@@ -243,6 +330,45 @@ program
         console.error('Invalid action. Use: set, status, or clear');
         process.exit(1);
     }
+  });
+
+program
+  .command('init')
+  .description('Initialize a new harness project')
+  .option('-w, --workspace <path>', 'Workspace path', process.cwd())
+  .action(async (options: { workspace: string }) => {
+    const workspace = options.workspace;
+    const harnessDir = join(workspace, '.harness');
+
+    if (!existsSync(harnessDir)) {
+      mkdirSync(harnessDir, { recursive: true });
+    }
+
+    const configPath = join(harnessDir, 'config.yaml');
+    if (!existsSync(configPath)) {
+      writeFileSync(configPath, DEFAULT_CONFIG_YAML, 'utf-8');
+      console.log('Created .harness/config.yaml');
+    } else {
+      console.log('.harness/config.yaml already exists, skipping');
+    }
+
+    const guardrailsPath = join(harnessDir, 'guardrails.yaml');
+    if (!existsSync(guardrailsPath)) {
+      writeFileSync(guardrailsPath, DEFAULT_GUARDRAILS_YAML, 'utf-8');
+      console.log('Created .harness/guardrails.yaml');
+    } else {
+      console.log('.harness/guardrails.yaml already exists, skipping');
+    }
+
+    const credDir = join(harnessDir, 'credentials');
+    if (!existsSync(credDir)) {
+      mkdirSync(credDir, { recursive: true });
+    }
+
+    console.log('Harness project initialized successfully!');
+    console.log('Next steps:');
+    console.log('  1. harness key set <provider>  - Configure API keys');
+    console.log('  2. harness run "your task"      - Start coding');
   });
 
 program.parse();

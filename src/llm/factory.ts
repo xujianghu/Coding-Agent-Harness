@@ -4,6 +4,12 @@ import { createOpenAIProvider } from './openai';
 import { createAnthropicProvider } from './anthropic';
 import { createGeminiProvider } from './gemini';
 
+const ENV_KEY_MAP: Record<string, string> = {
+  openai: 'OPENAI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+};
+
 export async function createLLMProvider(
   config: { provider: string; model: string },
   credentialManager: { get: (provider: string) => Promise<string | null> }
@@ -15,7 +21,8 @@ export async function createLLMProvider(
   }
 
   if (provider === 'openai' || provider === 'anthropic' || provider === 'gemini') {
-    const apiKey = await credentialManager.get(provider);
+    const apiKey = await credentialManager.get(provider)
+      ?? (ENV_KEY_MAP[provider] ? process.env[ENV_KEY_MAP[provider]] : undefined);
     if (!apiKey) {
       throw new Error(`API key not configured for ${provider}`);
     }
