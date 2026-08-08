@@ -60,5 +60,61 @@ export function createAnthropicProvider(config: {
 
       return result;
     },
+    completeStream: async (
+      messages: Array<{ role: string; content: string }>,
+      onToken: (token: string) => void
+    ): Promise<LLMResponse> => {
+      const systemMessage = messages.find((m) => m.role === 'system');
+      const nonSystemMessages = messages
+        .filter((m) => m.role !== 'system')
+        .map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        }));
+
+      const params: {
+        model: string;
+        messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+        system?: string;
+        max_tokens: number;
+        stream: boolean;
+      } = {
+        model: config.model,
+        messages: nonSystemMessages,
+        max_tokens: 4096,
+        stream: true,
+      };
+
+      if (systemMessage) {
+        params.system = systemMessage.content;
+      }
+
+      const stream = await client.messages.create(params) as unknown as AsyncIterable<any>;
+
+      let content = '';
+      let inputTokens: number | undefined;
+      let outputTokens: number | undefined;
+
+      for await (const event of stream) {
+        if (event.type === 'message_start') {
+          inputTokens = event.message.usage.input_tokens;
+        } else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          content += event.delta.text;
+          onToken(event.delta.text);
+        } else if (event.type === 'message_delta') {
+          outputTokens = event.usage?.output_tokens;
+        }
+      }
+
+      const result: LLMResponse = { content };
+      if (inputTokens !== undefined && outputTokens !== undefined) {
+        result.usage = {
+          promptTokens: inputTokens,
+          completionTokens: outputTokens,
+          totalTokens: inputTokens + outputTokens,
+        };
+      }
+      return result;
+    },
   };
 }

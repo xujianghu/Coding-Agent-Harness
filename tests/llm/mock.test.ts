@@ -45,4 +45,101 @@ describe('createMockLLM', () => {
     const result = await mock.complete([{ role: 'user', content: 'Hi' }]);
     expect(result.content).toBe('[MOCK] No more preset responses available');
   });
+
+  describe('completeStream', () => {
+    it('should call onToken for each character of the content', async () => {
+      const responses: LLMResponse[] = [
+        { content: 'Hello', usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } },
+      ];
+
+      const mock: LLMProvider = createMockLLM(responses);
+      const tokens: string[] = [];
+
+      const result = await mock.completeStream!(
+        [{ role: 'user', content: 'Hi' }],
+        (token) => tokens.push(token)
+      );
+
+      expect(tokens).toEqual(['H', 'e', 'l', 'l', 'o']);
+      expect(tokens.length).toBe(5);
+      expect(result.content).toBe('Hello');
+    });
+
+    it('should return complete LLMResponse from streaming', async () => {
+      const responses: LLMResponse[] = [
+        { content: 'World', usage: { promptTokens: 20, completionTokens: 10, totalTokens: 30 } },
+      ];
+
+      const mock: LLMProvider = createMockLLM(responses);
+      const tokens: string[] = [];
+
+      const result = await mock.completeStream!(
+        [{ role: 'user', content: 'Hi' }],
+        (token) => tokens.push(token)
+      );
+
+      expect(result.content).toBe('World');
+      expect(result.usage).toEqual({ promptTokens: 20, completionTokens: 10, totalTokens: 30 });
+    });
+
+    it('should handle empty content string', async () => {
+      const responses: LLMResponse[] = [
+        { content: '', usage: { promptTokens: 5, completionTokens: 0, totalTokens: 5 } },
+      ];
+
+      const mock: LLMProvider = createMockLLM(responses);
+      const tokens: string[] = [];
+
+      const result = await mock.completeStream!(
+        [{ role: 'user', content: 'Hi' }],
+        (token) => tokens.push(token)
+      );
+
+      expect(tokens).toEqual([]);
+      expect(result.content).toBe('');
+    });
+
+    it('should return fallback message when responses are exhausted', async () => {
+      const responses: LLMResponse[] = [
+        { content: 'Only one' },
+      ];
+
+      const mock: LLMProvider = createMockLLM(responses);
+      const tokens: string[] = [];
+
+      await mock.completeStream!(
+        [{ role: 'user', content: 'First' }],
+        (token) => tokens.push(token)
+      );
+
+      const tokens2: string[] = [];
+      const result = await mock.completeStream!(
+        [{ role: 'user', content: 'Second' }],
+        (token) => tokens2.push(token)
+      );
+
+      expect(result.content).toBe('[MOCK] No more preset responses available');
+      expect(tokens2.length).toBeGreaterThan(0);
+    });
+
+    it('should share the same response index with complete', async () => {
+      const responses: LLMResponse[] = [
+        { content: 'First' },
+        { content: 'Second' },
+      ];
+
+      const mock: LLMProvider = createMockLLM(responses);
+
+      const result1 = await mock.complete([{ role: 'user', content: 'A' }]);
+      expect(result1.content).toBe('First');
+
+      const tokens: string[] = [];
+      const result2 = await mock.completeStream!(
+        [{ role: 'user', content: 'B' }],
+        (token) => tokens.push(token)
+      );
+      expect(result2.content).toBe('Second');
+      expect(tokens).toEqual(['S', 'e', 'c', 'o', 'n', 'd']);
+    });
+  });
 });

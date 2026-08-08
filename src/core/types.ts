@@ -93,6 +93,7 @@ export interface LLMResponse {
 export interface LLMProvider {
   name: string;
   complete: (messages: Array<{ role: string; content: string }>) => Promise<LLMResponse>;
+  completeStream?: (messages: Array<{ role: string; content: string }>, onToken: (token: string) => void) => Promise<LLMResponse>;
 }
 
 export type AgentState = 'idle' | 'running' | 'waiting_approval' | 'completed' | 'error' | 'stopped';

@@ -39,5 +39,39 @@ export function createOpenAIProvider(config: {
 
       return result;
     },
+    completeStream: async (
+      messages: Array<{ role: string; content: string }>,
+      onToken: (token: string) => void
+    ): Promise<LLMResponse> => {
+      const stream = await client.chat.completions.create({
+        model: config.model,
+        messages: messages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+        stream: true,
+      });
+
+      let content = '';
+      let usage: LLMResponse['usage'];
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (delta) {
+          content += delta;
+          onToken(delta);
+        }
+        if (chunk.usage) {
+          usage = {
+            promptTokens: chunk.usage.prompt_tokens,
+            completionTokens: chunk.usage.completion_tokens,
+            totalTokens: chunk.usage.total_tokens,
+          };
+        }
+      }
+
+      const result: LLMResponse = { content };
+      if (usage) {
+        result.usage = usage;
+      }
+      return result;
+    },
   };
 }

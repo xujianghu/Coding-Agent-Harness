@@ -161,4 +161,132 @@ describe('createAnthropicProvider', () => {
     expect(result.content).toBe('No tools here');
     expect(result.toolCalls).toBeUndefined();
   });
+
+  describe('completeStream', () => {
+    it('should call onToken for each text_delta event', async () => {
+      const streamEvents = [
+        { type: 'message_start', message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'H' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'e' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'l' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'l' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'o' } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } },
+        { type: 'message_stop' },
+      ];
+
+      const asyncIterable = {
+        [Symbol.asyncIterator]: async function* () {
+          for (const event of streamEvents) {
+            yield event;
+          }
+        },
+      };
+      mockCreate.mockResolvedValueOnce(asyncIterable);
+
+      const provider: LLMProvider = createAnthropicProvider({
+        apiKey: 'test-key',
+        model: 'claude-sonnet-4-20250514',
+      });
+
+      const tokens: string[] = [];
+      const result = await provider.completeStream!(
+        [{ role: 'user', content: 'Hello' }],
+        (token) => tokens.push(token)
+      );
+
+      expect(tokens).toEqual(['H', 'e', 'l', 'l', 'o']);
+      expect(result.content).toBe('Hello');
+      expect(result.usage).toEqual({
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+      });
+    });
+
+    it('should pass stream: true to Anthropic SDK', async () => {
+      const asyncIterable = {
+        [Symbol.asyncIterator]: async function* () {
+          yield { type: 'message_start', message: { usage: { input_tokens: 2, output_tokens: 1 } } };
+          yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'OK' } };
+          yield { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } };
+          yield { type: 'message_stop' };
+        },
+      };
+      mockCreate.mockResolvedValueOnce(asyncIterable);
+
+      const provider: LLMProvider = createAnthropicProvider({
+        apiKey: 'test-key',
+        model: 'claude-sonnet-4-20250514',
+      });
+
+      await provider.completeStream!(
+        [{ role: 'system', content: 'Be helpful' }, { role: 'user', content: 'Hi' }],
+        () => {}
+      );
+
+      expect(mockCreate).toHaveBeenCalledWith({
+        model: 'claude-sonnet-4-20250514',
+        system: 'Be helpful',
+        messages: [{ role: 'user', content: 'Hi' }],
+        max_tokens: 4096,
+        stream: true,
+      });
+    });
+
+    it('should handle stream without usage info', async () => {
+      const asyncIterable = {
+        [Symbol.asyncIterator]: async function* () {
+          yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'No usage' } };
+          yield { type: 'message_stop' };
+        },
+      };
+      mockCreate.mockResolvedValueOnce(asyncIterable);
+
+      const provider: LLMProvider = createAnthropicProvider({
+        apiKey: 'test-key',
+        model: 'claude-sonnet-4-20250514',
+      });
+
+      const tokens: string[] = [];
+      const result = await provider.completeStream!(
+        [{ role: 'user', content: 'Hi' }],
+        (token) => tokens.push(token)
+      );
+
+      expect(result.content).toBe('No usage');
+      expect(result.usage).toBeUndefined();
+    });
+
+    it('should handle messages without system message in stream', async () => {
+      const asyncIterable = {
+        [Symbol.asyncIterator]: async function* () {
+          yield { type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 3 } } };
+          yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Response' } };
+          yield { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 3 } };
+          yield { type: 'message_stop' };
+        },
+      };
+      mockCreate.mockResolvedValueOnce(asyncIterable);
+
+      const provider: LLMProvider = createAnthropicProvider({
+        apiKey: 'test-key',
+        model: 'claude-sonnet-4-20250514',
+      });
+
+      await provider.completeStream!(
+        [{ role: 'user', content: 'Hello' }],
+        () => {}
+      );
+
+      expect(mockCreate).toHaveBeenCalledWith({
+        model: 'claude-sonnet-4-20250514',
+        messages: [{ role: 'user', content: 'Hello' }],
+        max_tokens: 4096,
+        stream: true,
+      });
+    });
+  });
 });

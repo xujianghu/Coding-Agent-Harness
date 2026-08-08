@@ -164,4 +164,98 @@ describe('createOpenAIProvider', () => {
     expect(result.content).toBe('No tools here');
     expect(result.toolCalls).toBeUndefined();
   });
+
+  describe('completeStream', () => {
+    it('should call onToken for each delta chunk', async () => {
+      const streamChunks = [
+        { choices: [{ delta: { content: 'H' } }] },
+        { choices: [{ delta: { content: 'e' } }] },
+        { choices: [{ delta: { content: 'l' } }] },
+        { choices: [{ delta: { content: 'l' } }] },
+        { choices: [{ delta: { content: 'o' } }] },
+        {
+          choices: [{ delta: {} }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        },
+      ];
+
+      const asyncIterable = {
+        [Symbol.asyncIterator]: async function* () {
+          for (const chunk of streamChunks) {
+            yield chunk;
+          }
+        },
+      };
+      mockCreate.mockResolvedValueOnce(asyncIterable);
+
+      const provider: LLMProvider = createOpenAIProvider({
+        apiKey: 'test-key',
+        model: 'gpt-4o',
+      });
+
+      const tokens: string[] = [];
+      const result = await provider.completeStream!(
+        [{ role: 'user', content: 'Hello' }],
+        (token) => tokens.push(token)
+      );
+
+      expect(tokens).toEqual(['H', 'e', 'l', 'l', 'o']);
+      expect(result.content).toBe('Hello');
+      expect(result.usage).toEqual({
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+      });
+    });
+
+    it('should pass stream: true to OpenAI SDK', async () => {
+      const asyncIterable = {
+        [Symbol.asyncIterator]: async function* () {
+          yield { choices: [{ delta: { content: 'OK' } }] };
+          yield { choices: [{ delta: {} }], usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 } };
+        },
+      };
+      mockCreate.mockResolvedValueOnce(asyncIterable);
+
+      const provider: LLMProvider = createOpenAIProvider({
+        apiKey: 'test-key',
+        model: 'gpt-4o',
+      });
+
+      await provider.completeStream!(
+        [{ role: 'user', content: 'Hi' }],
+        () => {}
+      );
+
+      expect(mockCreate).toHaveBeenCalledWith({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'Hi' }],
+        stream: true,
+      });
+    });
+
+    it('should handle stream without usage info', async () => {
+      const asyncIterable = {
+        [Symbol.asyncIterator]: async function* () {
+          yield { choices: [{ delta: { content: 'No usage' } }] };
+          yield { choices: [{ delta: {} }] };
+        },
+      };
+      mockCreate.mockResolvedValueOnce(asyncIterable);
+
+      const provider: LLMProvider = createOpenAIProvider({
+        apiKey: 'test-key',
+        model: 'gpt-4o',
+      });
+
+      const tokens: string[] = [];
+      const result = await provider.completeStream!(
+        [{ role: 'user', content: 'Hi' }],
+        (token) => tokens.push(token)
+      );
+
+      expect(result.content).toBe('No usage');
+      expect(result.usage).toBeUndefined();
+    });
+  });
 });
