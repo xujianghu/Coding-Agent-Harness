@@ -5,6 +5,7 @@ export interface GuardrailEngine {
   evaluate(action: AgentAction): GuardrailResult;
   addRule(rule: GuardrailRule): void;
   getRules(): GuardrailRule[];
+  replaceRules(rules: GuardrailRule[]): void;
 }
 
 export function createGuardrailEngine(rules: GuardrailRule[]): GuardrailEngine {
@@ -49,6 +50,11 @@ export function createGuardrailEngine(rules: GuardrailRule[]): GuardrailEngine {
 
     getRules(): GuardrailRule[] {
       return [...ruleList];
+    },
+
+    replaceRules(rules: GuardrailRule[]): void {
+      ruleList.length = 0;
+      ruleList.push(...rules);
     },
   };
 }

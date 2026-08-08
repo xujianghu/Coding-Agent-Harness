@@ -8,6 +8,7 @@ import { createShellTool } from '../tools/shell';
 import { createTestRunnerTool } from '../tools/test-runner';
 import { createLintTool } from '../tools/lint';
 import { createGuardrailEngine } from '../governance/guardrail';
+import { createGuardrailWatcher } from '../governance/watcher';
 import { createHITL } from '../governance/hitl';
 import { createSandbox } from '../governance/sandbox';
 import { createGovernancePipeline } from '../governance/pipeline';
@@ -158,6 +159,9 @@ program
     console.log(`Loaded ${rules.length} guardrail rules`);
 
     const guardrail = createGuardrailEngine(rules);
+    const guardrailWatcher = createGuardrailWatcher(rulesPath, guardrail);
+    guardrailWatcher.start();
+
     const hitl = createHITL();
     const sandbox = createSandbox(
       config.governance.sandbox.allowedPaths,
