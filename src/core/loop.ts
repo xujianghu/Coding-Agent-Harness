@@ -236,12 +236,14 @@ export function createAgentLoop(
         return { state, turns, summary, history };
       })();
 
-      return Promise.race([
+      const result = await Promise.race([
         runPromise,
-        new Promise<AgentRunResult>((_, reject) =>
-          setTimeout(() => reject(new Error(`Agent timed out after ${timeout}ms`)), timeout)
-        ),
+        new Promise<AgentRunResult>((_, reject) => {
+          const timer = setTimeout(() => reject(new Error(`Agent timed out after ${timeout}ms`)), timeout);
+          runPromise.finally(() => clearTimeout(timer));
+        }),
       ]);
+      return result;
     },
   };
 }
