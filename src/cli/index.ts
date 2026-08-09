@@ -23,6 +23,7 @@ import { createCredentialManager } from '../credential/manager';
 import { AgentAction, ConversationTurn } from '../core/types';
 import { parse } from 'yaml';
 import * as readline from 'readline';
+import { parseSessionState } from './session';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
@@ -373,6 +374,26 @@ program
     console.log('Next steps:');
     console.log('  1. harness key set <provider>  - Configure API keys');
     console.log('  2. harness run "your task"      - Start coding');
+  });
+
+program
+  .command('session resume')
+  .description('Resume from last session using audit log')
+  .option('-w, --workspace <path>', 'Workspace path', process.cwd())
+  .action(async (options: { workspace: string }) => {
+    const auditPath = join(options.workspace, '.harness/audit.log');
+    const sessionState = parseSessionState(auditPath);
+
+    if (!sessionState) {
+      console.log('No previous session found.');
+      return;
+    }
+
+    console.log(`Resuming session: ${sessionState.summary}`);
+    console.log(`Last turn: ${sessionState.lastTurn}`);
+    if (sessionState.lastAction) {
+      console.log(`Last action: ${sessionState.lastAction.type} ${JSON.stringify(sessionState.lastAction.params)}`);
+    }
   });
 
 program.parse();
