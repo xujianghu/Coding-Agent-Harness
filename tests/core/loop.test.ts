@@ -223,6 +223,32 @@ describe('createAgentLoop', () => {
       expect(result.history[0].role).toBe('user');
       expect(result.history[0].content).toBe('list files');
     });
+
+    it('传给 LLM 的消息不包含 feedback role（兼容 OpenAI/Anthropic/Gemini）', async () => {
+      const actionPayload = { action: { type: 'shell_exec', params: { command: 'ls' } } };
+      const capturedMessages: Array<Array<{ role: string; content: string }>> = [];
+      const recordingLLM: LLMProvider = {
+        name: 'recording',
+        complete: async (messages) => {
+          capturedMessages.push(messages);
+          if (capturedMessages.length === 1) {
+            return { content: JSON.stringify(actionPayload) };
+          }
+          return { content: JSON.stringify({ done: true, summary: 'done' }) };
+        },
+      };
+
+      const loop = createAgentLoop(makeConfig(), recordingLLM, [makeShellTool()], {});
+
+      await loop.run('list files');
+
+      // 第二轮消息应回灌第一轮的 action 结果，但 role 只允许 system/user/assistant。
+      const secondRound = capturedMessages[1];
+      const roles = secondRound.map((m) => m.role);
+      expect(roles).not.toContain('feedback');
+      expect(roles).toContain('user');
+      expect(secondRound.some((m) => m.content.includes('Action result'))).toBe(true);
+    });
   });
 
   describe('超时控制', () => {

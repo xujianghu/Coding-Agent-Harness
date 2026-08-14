@@ -52,7 +52,7 @@ function appendTurnMessages(
 ): void {
   messages.push({ role: 'assistant', content: response });
   messages.push({
-    role: 'feedback',
+    role: 'user',
     content: `Action result: ${JSON.stringify(result)}`,
   });
 }
@@ -205,7 +205,7 @@ export function createAgentLoop(
 
               messages.push({ role: 'assistant', content: response.content });
               messages.push({
-                role: 'feedback',
+                role: 'user',
                 content: `Action blocked: ${approval.reason || 'not allowed'}`,
               });
               messages = trimConversationHistory(messages, config.memory.maxConversationTurns);
