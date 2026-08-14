@@ -40,6 +40,9 @@ harness key set openai
 
 # 3. 执行任务
 harness run "创建一个 package.json 文件"
+
+# 4. 进入交互式对话（多轮有上下文）
+harness
 ```
 
 ## 安装指南
@@ -63,6 +66,30 @@ harness run -c .harness/config.yaml -w ./my-project "修复所有 lint 错误"
 |------|------|--------|
 | `-c, --config <path>` | 配置文件路径 | `.harness/config.yaml` |
 | `-w, --workspace <path>` | 工作区根路径 | 当前目录 |
+
+### `harness chat`（或直接 `harness`）
+
+进入交互式对话模式：多轮有上下文的对话，agent 既能文字回复，也能调用工具（读写文件、跑命令、跑测试）。
+
+```bash
+harness            # 无参数直接进入（默认命令）
+harness chat       # 或显式子命令
+```
+
+进入后逐行输入即可，输入 `exit` / `quit` / `q` 退出：
+
+```
+> 你好
+> 在 src 目录下创建一个 utils.ts
+> exit
+```
+
+| 选项 | 说明 | 默认值 |
+|------|------|--------|
+| `-c, --config <path>` | 配置文件路径 | `.harness/config.yaml` |
+| `-w, --workspace <path>` | 工作区根路径 | 当前目录 |
+| `-m, --mock` | 使用 mock LLM（不调真实 API） | 关闭 |
+| `-v, --verbose` | 打印发给 LLM 的完整消息 | 关闭 |
 
 ### `harness key set <provider>`
 
