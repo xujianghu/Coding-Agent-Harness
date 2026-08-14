@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { resolve, join, dirname } from 'path';
 import type { ToolDefinition, ActionResult } from '../core/types';
 
@@ -30,6 +30,9 @@ export function createReadFileTool(workspaceRoot: string): ToolDefinition {
       }
       if (!existsSync(filePath)) {
         return { success: false, output: '', error: `File not found: ${params.path}` };
+      }
+      if (statSync(filePath).isDirectory()) {
+        return { success: false, output: '', error: `Path is a directory: ${params.path}` };
       }
       const content = readFileSync(filePath, 'utf-8');
       return { success: true, output: content };

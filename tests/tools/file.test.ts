@@ -39,6 +39,15 @@ describe('FileTools', () => {
     expect(result.error).toContain('File not found');
   });
 
+  it('读取目录路径返回友好错误（不抛 EISDIR）', async () => {
+    mkdirSync(join(workspaceRoot, 'subdir'), { recursive: true });
+
+    const result = await readTool.execute({ path: 'subdir' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Path is a directory');
+  });
+
   it('写入文件后读取验证持久化', async () => {
     const writeResult = await writeTool.execute({ path: 'output.txt', content: 'persisted data' });
 

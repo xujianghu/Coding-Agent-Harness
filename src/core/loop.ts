@@ -104,7 +104,12 @@ export function executeAction(tools: ToolDefinition[], action: AgentAction): Pro
       error: `Unknown tool: ${action.type}`,
     });
   }
-  return tool.execute(action.params);
+  // 捕获工具执行异常，避免单个工具抛错导致整个进程崩溃。
+  return tool.execute(action.params).catch((err) => ({
+    success: false,
+    output: '',
+    error: err instanceof Error ? err.message : String(err),
+  }));
 }
 
 export function trimConversationHistory(
