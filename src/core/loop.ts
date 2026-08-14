@@ -97,17 +97,29 @@ export function parseResponse(
     const lastBrace = trimmed.lastIndexOf('}');
     if (firstBrace !== -1 && lastBrace > firstBrace) {
       const candidate = trimmed.slice(firstBrace, lastBrace + 1);
-      try {
-        const parsed = JSON.parse(candidate);
-        if (parsed.action && parsed.action.type && parsed.action.params) {
-          return { kind: 'action', action: parsed.action };
+
+      const parseCandidate = (s: string): ParsedResponse | null => {
+        try {
+          const parsed = JSON.parse(s);
+          if (parsed.action && parsed.action.type && parsed.action.params) {
+            return { kind: 'action', action: parsed.action };
+          }
+          if (parsed.done) {
+            return { kind: 'done', summary: parsed.summary || '' };
+          }
+          return null;
+        } catch {
+          return null;
         }
-        if (parsed.done) {
-          return { kind: 'done', summary: parsed.summary || '' };
-        }
-      } catch {
-        // 提取出的片段也不是有效 JSON，回退为纯文本。
-      }
+      };
+
+      const direct = parseCandidate(candidate);
+      if (direct) return direct;
+
+      // LLM 常在多行字符串字段（如 content）里放真正的换行而非 \n 转义，导致 JSON 无效。
+      // 尝试把裸换行修复为 \n 转义后再解析一次。
+      const repaired = parseCandidate(candidate.replace(/\r?\n/g, '\\n'));
+      if (repaired) return repaired;
     }
     return { kind: 'text', text: trimmed };
   }

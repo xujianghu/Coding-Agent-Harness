@@ -65,6 +65,42 @@ describe('createChatLoop', () => {
     expect(reply).toBe('这是当前目录的文件列表。');
   });
 
+  it('LLM 返回含裸换行的 write_file JSON → 修复转义并执行', async () => {
+    // content 字段里是真正的换行（裸换行），导致 JSON 无效——模拟 LLM 生成多行代码的常见问题。
+    const rawJson = '{"action":{"type":"write_file","params":{"path":"bubble_sort.c","content":"#include <stdio.h>\nint main() {\n    return 0;\n}\n"}}}';
+    const mixed = '让我写文件。\n\n' + rawJson;
+
+    const responses: LLMResponse[] = [
+      { content: mixed },
+      { content: '文件已生成。' },
+    ];
+    const mockLLM = createMockLLM(responses);
+
+    let writtenPath = '';
+    let writtenContent = '';
+    const tool: ToolDefinition = {
+      name: 'write_file',
+      description: 'Write a file',
+      parameters: {
+        path: { type: 'string', description: 'path', required: true },
+        content: { type: 'string', description: 'content', required: true },
+      },
+      execute: async (params) => {
+        writtenPath = params.path;
+        writtenContent = params.content;
+        return { success: true, output: 'File written' };
+      },
+    };
+
+    const chat = createChatLoop(makeConfig(), mockLLM, [tool], {});
+
+    const reply = await chat.send('写个文件');
+
+    expect(writtenPath).toBe('bubble_sort.c');
+    expect(writtenContent).toContain('#include <stdio.h>');
+    expect(reply).toBe('文件已生成。');
+  });
+
   it('LLM 返回 action → 执行工具 → 回灌结果 → 最终返回文本', async () => {
     const responses: LLMResponse[] = [
       { content: JSON.stringify({ action: { type: 'shell_exec', params: { command: 'ls' } } }) },
