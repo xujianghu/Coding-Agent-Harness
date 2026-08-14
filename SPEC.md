@@ -66,6 +66,7 @@
 #### 3.3.1 文件读写
 - `read_file(path)`: 读取文件内容，路径受沙箱约束
 - `write_file(path, content)`: 写入文件，路径受沙箱约束
+- `delete_file(path)`: 删除文件，路径受沙箱约束，需 HITL 审批确认
 
 #### 3.3.2 Shell 执行
 - `shell_exec(command)`: 执行命令，受护栏拦截
@@ -116,22 +117,13 @@ rules:
     action: block
 ```
 
-### 3.5 反馈闭环
+### 3.5 反馈闭环（已移除）
 
-**输入**：工具执行结果  
-**行为**：
-1. 测试运行器：执行测试 → 解析 JUnit/JSON 输出 → 结构化判定
-2. Lint/类型检查：执行 → 解析输出 → 结构化诊断
-3. 反馈回灌器：将结构化反馈注入下一轮 LLM 上下文
+> 独立的 feedback 模块（runner/parser/injector）在重构中移除——测试/Lint 结果现由 `run_test`/`run_lint` 工具直接以 `ActionResult` 回灌给 LLM。
 
-**输出**：`{type, passed, details[], summary}`  
-**边界条件**：测试超时 120s，解析失败降级为原始输出
+### 3.6 记忆系统（已移除）
 
-### 3.6 记忆系统
-
-**会话内**：内存数组存储最近 20 轮对话  
-**跨会话**：JSON 文件存储于 `.harness/memory/`，支持关键词检索  
-**项目约定**：自动提取用户标注的约定，下次会话自动加载
+> 独立的 memory 模块（store/retriever）在重构中移除——对话上下文现仅进程内保留，由 `trimConversationHistory` 按 `memory.maxConversationTurns` 裁剪。
 
 ### 3.7 配置系统
 

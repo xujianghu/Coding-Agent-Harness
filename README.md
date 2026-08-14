@@ -162,12 +162,10 @@ harness run "你的任务"
 ## 目录结构
 
 ```
-src/core/         # Agent 主循环 + 核心类型
-src/llm/          # LLM 抽象层（Mock + OpenAI + Anthropic + Gemini）
-src/tools/        # 工具系统（注册表 + 文件/Shell/测试/Lint）
+src/core/         # Agent 主循环（loop 任务执行 + chat 对话）
+src/llm/          # LLM 抽象层（Mock + OpenAI + Anthropic + Gemini，原生 function calling）
+src/tools/        # 工具系统（文件读写/删除 + Shell + 测试 + Lint）
 src/governance/   # 治理护栏（护栏引擎 + HITL + 沙箱 + 管道 + 审计）
-src/feedback/     # 反馈闭环（执行器 + 解析器 + 回灌器）
-src/memory/       # 记忆系统（存储 + 检索）
 src/config/       # 配置系统
 src/credential/   # 凭据管理
 src/cli/          # CLI 入口

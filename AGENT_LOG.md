@@ -334,3 +334,43 @@ OPTIMIZATION_PLAN.md 提出的 28 条优化项经逐条对照源码验证，**�
 | Git 提交 | 24 | **28** |
 
 **P0 优化总结：** 四个架构缺陷全部修复，真实 LLM 可通过工厂路由接入，标准 Tool-Use 协议已支持，治理管道覆盖所有动作类型，消息历史自动裁剪。项目从"概念演示"升级到"可用原型"。
+
+---
+
+## 2026-08-14 · 会话优化 · 交互式对话 + function calling + 清理
+
+在 P0 优化基础上，进行大规模功能增强与代码清理，将项目从「一次性任务执行器」升级为「类 Claude Code 的对话式编码 agent」。
+
+### 新增功能
+
+| 功能 | 说明 |
+|------|------|
+| 交互式对话模式 | 新增 `harness chat`（无参数 `harness` 默认进入），多轮有上下文对话，LLM 既能文字回复也能调用工具 |
+| 原生 function calling | LLM Provider 通过 `tool_calls` 返回结构化参数，根治 JSON 转义问题（取代 JSON 文本解析） |
+| delete_file 工具 | 新增删除文件工具，受沙箱路径白名单 + 敏感路径黑名单约束 |
+| HITL 审批扩展 | 删除文件询问确认；`git push`/`git commit`/`npm publish` 命令审批 |
+| DeepSeek 接入 | openai provider 支持 `baseUrl`，接入 DeepSeek 等 OpenAI 兼容服务 |
+
+### 代码清理
+
+- 移除未接入主循环的死代码：`src/memory/`（store/retriever）、`src/feedback/`（runner/parser/injector）及对应测试
+- 移除依赖 feedback 的 `demo/02-feedback-loop.ts`，`npm run demo` 改为 01 + 03
+- `parseResponse` 改造为三态（action/done/text），支持自由文本回复
+
+### Bug 修复
+
+- guardrail 空正则误匹配所有命令（无 pattern 的 sandbox 规则）
+- `feedback` role 导致多轮 API 400（改为 user role）
+- 工具执行异常导致进程崩溃（EISDIR 读目录）
+- 审批状态机 `Cannot approve in idle state` 崩溃
+- 任务结束后进程不退出（护栏 watcher 未关闭）
+- LLM key 未配置时崩溃（改为友好提示）
+
+### 验证
+
+| 指标 | 数值 |
+|------|------|
+| 单元测试 | 201（24 文件，mock LLM 驱动） |
+| 演示脚本 | 23 通过 |
+| 编译 | 零错误 |
+| 真实 LLM | Anthropic + DeepSeek 端到端跑通 |
