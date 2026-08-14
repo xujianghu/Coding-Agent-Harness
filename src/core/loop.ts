@@ -91,6 +91,24 @@ export function parseResponse(
     }
     return { kind: 'text', text: trimmed };
   } catch {
+    // 整体 JSON.parse 失败，可能是「文本说明 + JSON action」混合输出。
+    // 尝试提取内容中内嵌的 JSON 对象（从首个 { 到最后一个 }）。
+    const firstBrace = trimmed.indexOf('{');
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const candidate = trimmed.slice(firstBrace, lastBrace + 1);
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed.action && parsed.action.type && parsed.action.params) {
+          return { kind: 'action', action: parsed.action };
+        }
+        if (parsed.done) {
+          return { kind: 'done', summary: parsed.summary || '' };
+        }
+      } catch {
+        // 提取出的片段也不是有效 JSON，回退为纯文本。
+      }
+    }
     return { kind: 'text', text: trimmed };
   }
 }

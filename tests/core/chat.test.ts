@@ -40,6 +40,31 @@ describe('createChatLoop', () => {
     expect(reply).toBe('Hello, how can I help?');
   });
 
+  it('LLM 返回「文本说明 + JSON action」混合内容 → 提取并执行 action', async () => {
+    const mixed = '让我先看看当前项目的情况。\n\n{"action": {"type": "shell_exec", "params": {"command": "ls"}}}';
+    const responses: LLMResponse[] = [
+      { content: mixed },
+      { content: '这是当前目录的文件列表。' },
+    ];
+    const mockLLM = createMockLLM(responses);
+
+    let executed = false;
+    const tool: ToolDefinition = {
+      ...makeShellTool(),
+      execute: async (params) => {
+        executed = true;
+        return { success: true, output: `executed: ${params.command}` };
+      },
+    };
+
+    const chat = createChatLoop(makeConfig(), mockLLM, [tool], {});
+
+    const reply = await chat.send('这是什么项目');
+
+    expect(executed).toBe(true);
+    expect(reply).toBe('这是当前目录的文件列表。');
+  });
+
   it('LLM 返回 action → 执行工具 → 回灌结果 → 最终返回文本', async () => {
     const responses: LLMResponse[] = [
       { content: JSON.stringify({ action: { type: 'shell_exec', params: { command: 'ls' } } }) },
