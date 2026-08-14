@@ -16,19 +16,9 @@ function buildChatSystemPrompt(tools: ToolDefinition[]): string {
     })
     .join('\n\n');
 
-  return `You are a coding assistant in an interactive CLI.
+  return `You are a coding assistant in an interactive CLI. You have tools available for reading, writing and deleting files, running shell commands, and running tests/lint.
 
-You can either:
-1. Reply directly in plain text to answer questions or explain something.
-2. Perform an action (read/write a file, run a shell command, run tests/lint) by responding with ONLY a JSON object:
-
-\`\`\`json
-{"action": {"type": "<tool_name>", "params": { ... }}}
-\`\`\`
-
-After you perform an action, you will receive a user message with the action result. Use it to decide your next action, or reply with plain text.
-
-When you have finished the user's request, reply with plain text summarizing what you did.
+Use a tool whenever you need to inspect or modify the workspace. After each tool call you'll receive its result, then continue or reply in plain text. When you've finished the user's request, reply in plain text.
 
 Available tools:
 ${toolList}`;
@@ -71,7 +61,11 @@ export function createChatLoop(
 
         // kind === 'action'
         const action = parsed.action;
-        messages.push({ role: 'assistant', content: response.content });
+        // function calling 时 response.content 可能为空，记录工具调用详情，让 agent 记住自己做了什么。
+        messages.push({
+          role: 'assistant',
+          content: response.content || `调用工具 ${action.type} ${JSON.stringify(action.params)}`,
+        });
 
         actionsThisTurn++;
         if (actionsThisTurn > config.agent.maxTurns) {
@@ -95,7 +89,7 @@ export function createChatLoop(
         const result = await executeAction(tools, action);
         messages.push({
           role: 'user',
-          content: `Action result: ${JSON.stringify(result)}`,
+          content: `${action.type} ${JSON.stringify(action.params)} 结果: ${JSON.stringify(result)}`,
         });
         messages = trimConversationHistory(messages, config.memory.maxConversationTurns);
       }
