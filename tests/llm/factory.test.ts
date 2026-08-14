@@ -1,7 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createLLMProvider } from '../../src/llm/factory';
 
 describe('createLLMProvider', () => {
+  beforeEach(() => {
+    // 隔离环境变量，避免本机已设置的 *_API_KEY 干扰“无 key 应抛错”的断言。
+    // 用空字符串（而非 undefined）——vitest 1.6 下 stubEnv 传 undefined 不会删除变量。
+    vi.stubEnv('OPENAI_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('GEMINI_API_KEY', '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("provider='mock' → returns MockLLMProvider (name='mock')", async () => {
     const credManager = {
       get: async (_provider: string) => null,
