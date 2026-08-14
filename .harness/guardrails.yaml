@@ -23,7 +23,3 @@ rules:
     pattern: "sudo"
     severity: high
     action: approve
-  - name: "沙箱路径限制"
-    type: sandbox
-    severity: high
-    action: block

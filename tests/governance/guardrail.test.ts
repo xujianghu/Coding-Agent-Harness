@@ -25,6 +25,20 @@ describe('GuardrailEngine', () => {
     },
   ];
 
+  it('应跳过无 pattern 的规则，避免空正则误匹配所有命令', () => {
+    const sandboxRule = {
+      name: '沙箱路径限制',
+      type: 'sandbox',
+      severity: 'high',
+      action: 'block',
+    } as unknown as GuardrailRule;
+
+    const engine = createGuardrailEngine([sandboxRule]);
+    const result = engine.evaluate({ type: 'shell_exec', params: { command: 'ls -la' } });
+
+    expect(result.allowed).toBe(true);
+  });
+
   it('should block rm -rf / command', () => {
     const engine = createGuardrailEngine(rules);
     const action: AgentAction = {

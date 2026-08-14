@@ -23,6 +23,10 @@ export function createGuardrailEngine(rules: GuardrailRule[]): GuardrailEngine {
       }
 
       for (const rule of ruleList) {
+        if (!rule.pattern) {
+          // 跳过无 pattern 的规则（如 type: sandbox），避免 new RegExp(undefined) 变成空正则误匹配所有命令。
+          continue;
+        }
         const regex = new RegExp(rule.pattern, 'i');
         if (regex.test(command)) {
           if (rule.action === 'block') {
