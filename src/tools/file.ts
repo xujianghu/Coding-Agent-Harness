@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
 import { resolve, join, dirname } from 'path';
 import type { ToolDefinition, ActionResult } from '../core/types';
 
@@ -66,6 +66,36 @@ export function createWriteFileTool(workspaceRoot: string): ToolDefinition {
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, params.content, 'utf-8');
       return { success: true, output: 'File written' };
+    },
+  };
+}
+
+export function createDeleteFileTool(workspaceRoot: string): ToolDefinition {
+  return {
+    name: 'delete_file',
+    description: 'Deletes a file from the workspace',
+    parameters: {
+      path: { type: 'string', description: 'Path relative to workspace root', required: true },
+    },
+    execute: async (params: Record<string, string>): Promise<ActionResult> => {
+      if (!params.path || params.path.trim() === '') {
+        return { success: false, output: '', error: 'Path is required' };
+      }
+      if (isSensitivePath(params.path)) {
+        return { success: false, output: '', error: `Sensitive path is blocked: ${params.path}` };
+      }
+      const filePath = resolve(join(workspaceRoot, params.path));
+      if (!filePath.startsWith(resolve(workspaceRoot))) {
+        return { success: false, output: '', error: 'Path traversal detected' };
+      }
+      if (!existsSync(filePath)) {
+        return { success: false, output: '', error: `File not found: ${params.path}` };
+      }
+      if (statSync(filePath).isDirectory()) {
+        return { success: false, output: '', error: `Path is a directory: ${params.path}` };
+      }
+      unlinkSync(filePath);
+      return { success: true, output: 'File deleted' };
     },
   };
 }

@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import { loadConfig } from '../config/loader';
 import { createToolRegistry } from '../tools/registry';
-import { createReadFileTool, createWriteFileTool } from '../tools/file';
+import { createReadFileTool, createWriteFileTool, createDeleteFileTool } from '../tools/file';
 import { createShellTool } from '../tools/shell';
 import { createTestRunnerTool } from '../tools/test-runner';
 import { createLintTool } from '../tools/lint';
@@ -139,6 +139,7 @@ async function setupHarness(configPath: string, workspace: string): Promise<Harn
   const registry = createToolRegistry();
   registry.register(createReadFileTool(workspace));
   registry.register(createWriteFileTool(workspace));
+  registry.register(createDeleteFileTool(workspace));
   registry.register(createShellTool());
   registry.register(createTestRunnerTool());
   registry.register(createLintTool());
@@ -344,6 +345,8 @@ program
         });
         if (!result.allowed) {
           if (result.requiresApproval) {
+            // 先置 pending，再询问；否则 approve/reject 会因 idle 状态抛错。
+            hitl.requestApproval(action);
             const answer = await rl.question(`  [HITL] Approve ${action.type}? (y/N): `);
             if (answer.toLowerCase().startsWith('y')) {
               hitl.approve();

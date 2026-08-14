@@ -55,6 +55,19 @@ describe('GovernancePipeline', () => {
     expect(result.pipelineStages).toContain('audit');
   });
 
+  it('delete_file → 触发审批（requiresApproval=true），不直接放行', () => {
+    const guardrail = createGuardrailEngine(rules);
+    const hitl = createHITL();
+    const sandbox = createSandbox(allowedPaths, allowedCommands);
+    const pipeline = createGovernancePipeline(guardrail, hitl, sandbox);
+
+    const action: AgentAction = { type: 'delete_file', params: { path: './src/test.ts' } };
+    const result = pipeline.process(action);
+    expect(result.allowed).toBe(false);
+    expect(result.requiresApproval).toBe(true);
+    expect(result.pipelineStages).toContain('hitl');
+  });
+
   it('write_file 越界路径（/etc/passwd）→ 被沙箱拦截，allowed=false', () => {
     const guardrail = createGuardrailEngine(rules);
     const hitl = createHITL();

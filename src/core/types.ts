@@ -1,5 +1,5 @@
 export interface AgentAction {
-  type: 'read_file' | 'write_file' | 'shell_exec' | 'run_test' | 'run_lint';
+  type: 'read_file' | 'write_file' | 'delete_file' | 'shell_exec' | 'run_test' | 'run_lint';
   params: Record<string, string>;
 }
 

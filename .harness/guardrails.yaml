@@ -23,3 +23,15 @@ rules:
     pattern: "sudo"
     severity: high
     action: approve
+  - name: "git push 需审批"
+    pattern: "git\\s+push"
+    severity: high
+    action: approve
+  - name: "git commit 需审批"
+    pattern: "git\\s+commit"
+    severity: medium
+    action: approve
+  - name: "npm publish 需审批"
+    pattern: "npm\\s+publish"
+    severity: high
+    action: approve

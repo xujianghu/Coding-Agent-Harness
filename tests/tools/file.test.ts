@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createReadFileTool, createWriteFileTool } from '../../src/tools/file';
-import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'fs';
+import { createReadFileTool, createWriteFileTool, createDeleteFileTool } from '../../src/tools/file';
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { ToolDefinition } from '../../src/core/types';
@@ -9,12 +9,14 @@ describe('FileTools', () => {
   let workspaceRoot: string;
   let readTool: ToolDefinition;
   let writeTool: ToolDefinition;
+  let deleteTool: ToolDefinition;
 
   beforeEach(() => {
     workspaceRoot = join(tmpdir(), `harness-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(workspaceRoot, { recursive: true });
     readTool = createReadFileTool(workspaceRoot);
     writeTool = createWriteFileTool(workspaceRoot);
+    deleteTool = createDeleteFileTool(workspaceRoot);
   });
 
   afterEach(() => {
@@ -46,6 +48,23 @@ describe('FileTools', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Path is a directory');
+  });
+
+  it('删除文件', async () => {
+    const filePath = join(workspaceRoot, 'to-delete.txt');
+    writeFileSync(filePath, 'delete me');
+
+    const result = await deleteTool.execute({ path: 'to-delete.txt' });
+
+    expect(result.success).toBe(true);
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it('删除不存在文件返回错误', async () => {
+    const result = await deleteTool.execute({ path: 'nonexistent.txt' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('File not found');
   });
 
   it('写入文件后读取验证持久化', async () => {

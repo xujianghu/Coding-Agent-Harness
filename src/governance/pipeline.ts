@@ -66,6 +66,24 @@ export function createGovernancePipeline(
           };
         }
 
+        case 'delete_file': {
+          const sandboxResult = sandbox.checkPath(action.params.path);
+          if (!sandboxResult.allowed) {
+            return {
+              allowed: false,
+              reason: sandboxResult.reason,
+              pipelineStages: ['sandbox'],
+            };
+          }
+          // 删除是不可逆操作，参考 Claude Code 默认询问用户确认。
+          return {
+            allowed: false,
+            requiresApproval: true,
+            reason: `About to delete file: ${action.params.path}`,
+            pipelineStages: ['sandbox', 'hitl'],
+          };
+        }
+
         case 'run_test':
         case 'run_lint': {
           const sandboxResult = sandbox.checkCommand(action.params.command);
