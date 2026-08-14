@@ -8,7 +8,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo": "npx tsx demo/01-guardrail-intercept.ts && npx tsx demo/02-feedback-loop.ts && npx tsx demo/03-deep-dimension.ts",
+    "demo": "npx tsx demo/01-guardrail-intercept.ts && npx tsx demo/03-deep-dimension.ts",
     "start": "node dist/cli/index.js"
   },
   "dependencies": {
