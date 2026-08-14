@@ -262,12 +262,21 @@ program
     });
 
     console.log(`\nRunning task: ${task}\n`);
-    const result = await agent.run(task);
+    try {
+      const result = await agent.run(task);
 
-    console.log(`\n=== Task Complete ===`);
-    console.log(`Status: ${result.state}`);
-    console.log(`Turns: ${result.turns}`);
-    console.log(`Summary: ${result.summary}`);
+      console.log(`\n=== Task Complete ===`);
+      console.log(`Status: ${result.state}`);
+      console.log(`Turns: ${result.turns}`);
+      console.log(`Summary: ${result.summary}`);
+    } catch (error) {
+      console.error(`\n=== Task Failed ===`);
+      console.error(`Error: ${(error as Error).message}`);
+      process.exitCode = 1;
+    } finally {
+      // 关闭护栏文件监听，避免 fs.watch 让进程在任务结束后无法退出。
+      guardrailWatcher.stop();
+    }
   });
 
 program
