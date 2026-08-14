@@ -11,9 +11,7 @@ governance:
   rulesFile: .harness/guardrails.yaml
   sandbox:
     allowedPaths:
-      - ./workspace
-      - ./src
-      - ./tests
+      - ./
     allowedCommands:
       - npm
       - node
@@ -23,6 +21,12 @@ governance:
       - vitest
       - jest
       - git
+      - ls
+      - pwd
+      - cat
+      - echo
+      - head
+      - tail
 memory:
   storagePath: .harness/memory/
   maxConversationTurns: 20
