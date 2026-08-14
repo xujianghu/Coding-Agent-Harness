@@ -101,6 +101,21 @@ harness key clear openai
 - `harness key status` 只显示 `configured` / `not configured`，**绝不输出明文 Key**
 - 推荐配合环境变量注入方案使用（后续版本支持）
 
+## 接入 DeepSeek / 其他 OpenAI 兼容服务
+
+DeepSeek 的 API 兼容 OpenAI 协议，无需新增 provider，通过 `baseUrl` 即可接入：
+
+```yaml
+# .harness/config.yaml
+llm:
+  provider: openai            # 复用 openai 适配器
+  model: deepseek-chat        # 或 deepseek-reasoner（推理）
+  baseUrl: https://api.deepseek.com
+```
+
+然后配置 DeepSeek 的 key（`harness key set openai`，或设置 `OPENAI_API_KEY` 环境变量），
+运行 `harness run "你的任务"` 即可。其余 OpenAI 兼容服务（如 Moonshot、通义千问）同理，只需替换 `baseUrl` 与 `model`。
+
 ## 分发方式
 
 ### Docker
@@ -160,7 +175,7 @@ demo/             # 机制演示脚本
 - 需要 Node.js 20+
 - 凭据存储为本地 JSON 文件（`.harness/credentials/credentials.json`）
 - 护栏规则为静态正则匹配，不支持语义分析
-- 当前仅 Mock LLM 驱动 Agent 主循环，真实 LLM 适配预览中
+- 真实 LLM 适配已实现（OpenAI / Anthropic / Gemini，以及通过 `baseUrl` 接入的 DeepSeek 等 OpenAI 兼容服务），需自备 API key
 
 ## 开发指南
 

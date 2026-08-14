@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockCreate = vi.fn();
+const { mockCreate, mockConstructor } = vi.hoisted(() => ({
+  mockCreate: vi.fn(),
+  mockConstructor: vi.fn(),
+}));
+
 vi.mock('openai', () => ({
-  default: vi.fn().mockImplementation(() => ({
+  default: mockConstructor.mockImplementation(() => ({
     chat: {
       completions: {
         create: mockCreate,
@@ -25,6 +29,43 @@ describe('createOpenAIProvider', () => {
       model: 'gpt-4o',
     });
     expect(provider.name).toBe('openai');
+  });
+
+  it('should pass baseURL to OpenAI SDK when baseUrl is provided', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: 'Hi from DeepSeek' } }],
+    });
+
+    const provider: LLMProvider = createOpenAIProvider({
+      apiKey: 'test-key',
+      model: 'deepseek-chat',
+      baseUrl: 'https://api.deepseek.com',
+    });
+
+    await provider.complete([{ role: 'user', content: 'Hello' }]);
+
+    expect(mockConstructor).toHaveBeenCalledWith({
+      apiKey: 'test-key',
+      baseURL: 'https://api.deepseek.com',
+    });
+  });
+
+  it('should pass baseURL as undefined when baseUrl is omitted', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: 'Hi from OpenAI' } }],
+    });
+
+    const provider: LLMProvider = createOpenAIProvider({
+      apiKey: 'test-key',
+      model: 'gpt-4o',
+    });
+
+    await provider.complete([{ role: 'user', content: 'Hello' }]);
+
+    expect(mockConstructor).toHaveBeenCalledWith({
+      apiKey: 'test-key',
+      baseURL: undefined,
+    });
   });
 
   it('should call OpenAI SDK with correct parameters', async () => {

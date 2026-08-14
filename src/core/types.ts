@@ -59,6 +59,8 @@ export interface AgentConfig {
     model: string;
     maxTokens: number;
     temperature: number;
+    /** 可选：自定义 API 端点。用于接入 OpenAI 兼容服务（如 DeepSeek：https://api.deepseek.com）。 */
+    baseUrl?: string;
   };
   agent: {
     maxTurns: number;

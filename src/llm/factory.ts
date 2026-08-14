@@ -11,7 +11,7 @@ const ENV_KEY_MAP: Record<string, string> = {
 };
 
 export async function createLLMProvider(
-  config: { provider: string; model: string },
+  config: { provider: string; model: string; baseUrl?: string },
   credentialManager: { get: (provider: string) => Promise<string | null> }
 ): Promise<LLMProvider> {
   const { provider, model } = config;
@@ -27,7 +27,7 @@ export async function createLLMProvider(
       throw new Error(`API key not configured for ${provider}`);
     }
     if (provider === 'openai') {
-      return createOpenAIProvider({ apiKey, model });
+      return createOpenAIProvider({ apiKey, model, baseUrl: config.baseUrl });
     }
     if (provider === 'anthropic') {
       return createAnthropicProvider({ apiKey, model });

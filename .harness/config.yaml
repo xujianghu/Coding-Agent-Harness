@@ -1,6 +1,7 @@
 llm:
   provider: openai
-  model: gpt-4o
+  model: deepseek-chat
+  baseUrl: https://api.deepseek.com
   maxTokens: 4096
   temperature: 0.1
 agent:

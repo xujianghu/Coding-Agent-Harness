@@ -4,8 +4,9 @@ import { LLMProvider, LLMResponse } from '../core/types';
 export function createOpenAIProvider(config: {
   apiKey: string;
   model: string;
+  baseUrl?: string;
 }): LLMProvider {
-  const client = new OpenAI({ apiKey: config.apiKey });
+  const client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl });
 
   return {
     name: 'openai',
