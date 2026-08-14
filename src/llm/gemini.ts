@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { LLMProvider, LLMResponse } from '../core/types';
+import { LLMProvider, LLMResponse, ToolDefinition } from '../core/types';
 
 export function createGeminiProvider(config: {
   apiKey: string;
@@ -10,7 +10,8 @@ export function createGeminiProvider(config: {
   return {
     name: 'gemini',
     complete: async (
-      messages: Array<{ role: string; content: string }>
+      messages: Array<{ role: string; content: string }>,
+      _tools?: ToolDefinition[],
     ): Promise<LLMResponse> => {
       const systemMessage = messages.find((m) => m.role === 'system');
       const nonSystemMessages = messages

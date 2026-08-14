@@ -195,7 +195,7 @@ export function createAgentLoop(
 
         while (!checkStopCondition(turns, maxTurns)) {
           callbacks.onMessage?.(messages);
-          const response = await llm.complete(messages);
+          const response = await llm.complete(messages, tools);
           turns++;
 
           if ((!response.content || response.content.trim() === '') && (!response.toolCalls || response.toolCalls.length === 0)) {

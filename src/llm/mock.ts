@@ -1,11 +1,11 @@
-import { LLMProvider, LLMResponse } from '../core/types';
+import { LLMProvider, LLMResponse, ToolDefinition } from '../core/types';
 
 export function createMockLLM(responses: LLMResponse[]): LLMProvider {
   let index = 0;
 
   return {
     name: 'mock',
-    complete: async (_messages: Array<{ role: string; content: string }>) => {
+    complete: async (_messages: Array<{ role: string; content: string }>, _tools?: ToolDefinition[]) => {
       if (index >= responses.length) {
         return { content: '[MOCK] No more preset responses available' };
       }

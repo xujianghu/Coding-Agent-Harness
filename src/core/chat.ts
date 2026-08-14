@@ -56,7 +56,7 @@ export function createChatLoop(
 
       while (true) {
         callbacks.onMessage?.(messages);
-        const response = await llm.complete(messages);
+        const response = await llm.complete(messages, tools);
         const parsed = parseResponse(response.content, response.toolCalls);
 
         if (parsed.kind === 'text') {

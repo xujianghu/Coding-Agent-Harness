@@ -24,26 +24,12 @@ export interface PipelineResult {
   pipelineStages: string[];
 }
 
-export interface FeedbackSignal {
-  type: 'test' | 'lint' | 'typecheck' | 'guardrail';
-  passed: boolean;
-  details: Array<{ file: string; line: number; message: string }>;
-  summary: string;
-}
-
 export interface ConversationTurn {
   role: 'user' | 'assistant' | 'system' | 'feedback';
   content: string;
   timestamp: number;
   action?: AgentAction;
   result?: ActionResult;
-}
-
-export interface MemoryEntry {
-  key: string;
-  value: string;
-  category: 'convention' | 'decision' | 'structure';
-  timestamp: number;
 }
 
 export interface ToolDefinition {
@@ -94,7 +80,7 @@ export interface LLMResponse {
 
 export interface LLMProvider {
   name: string;
-  complete: (messages: Array<{ role: string; content: string }>) => Promise<LLMResponse>;
+  complete: (messages: Array<{ role: string; content: string }>, tools?: ToolDefinition[]) => Promise<LLMResponse>;
   completeStream?: (messages: Array<{ role: string; content: string }>, onToken: (token: string) => void) => Promise<LLMResponse>;
 }
 

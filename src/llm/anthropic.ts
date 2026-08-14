@@ -1,5 +1,19 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { LLMProvider, LLMResponse } from '../core/types';
+import { LLMProvider, LLMResponse, ToolDefinition } from '../core/types';
+
+function toAnthropicTools(tools: ToolDefinition[]): Array<Record<string, unknown>> {
+  return tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: {
+      type: 'object',
+      properties: Object.fromEntries(
+        Object.entries(t.parameters).map(([k, v]) => [k, { type: v.type, description: v.description }]),
+      ),
+      required: Object.entries(t.parameters).filter(([, v]) => v.required).map(([k]) => k),
+    },
+  }));
+}
 
 export function createAnthropicProvider(config: {
   apiKey: string;
@@ -10,7 +24,8 @@ export function createAnthropicProvider(config: {
   return {
     name: 'anthropic',
     complete: async (
-      messages: Array<{ role: string; content: string }>
+      messages: Array<{ role: string; content: string }>,
+      tools?: ToolDefinition[],
     ): Promise<LLMResponse> => {
       const systemMessage = messages.find((m) => m.role === 'system');
       const nonSystemMessages = messages
@@ -25,10 +40,12 @@ export function createAnthropicProvider(config: {
         messages: Array<{ role: 'user' | 'assistant'; content: string }>;
         system?: string;
         max_tokens: number;
+        tools?: any[];
       } = {
         model: config.model,
         messages: nonSystemMessages,
         max_tokens: 4096,
+        ...(tools && tools.length > 0 ? { tools: toAnthropicTools(tools) } : {}),
       };
 
       if (systemMessage) {

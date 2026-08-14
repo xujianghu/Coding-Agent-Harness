@@ -1,5 +1,22 @@
 import OpenAI from 'openai';
-import { LLMProvider, LLMResponse } from '../core/types';
+import { LLMProvider, LLMResponse, ToolDefinition } from '../core/types';
+
+function toOpenAITools(tools: ToolDefinition[]) {
+  return tools.map((t) => ({
+    type: 'function' as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: {
+        type: 'object' as const,
+        properties: Object.fromEntries(
+          Object.entries(t.parameters).map(([k, v]) => [k, { type: v.type, description: v.description }]),
+        ),
+        required: Object.entries(t.parameters).filter(([, v]) => v.required).map(([k]) => k),
+      },
+    },
+  }));
+}
 
 export function createOpenAIProvider(config: {
   apiKey: string;
@@ -11,11 +28,13 @@ export function createOpenAIProvider(config: {
   return {
     name: 'openai',
     complete: async (
-      messages: Array<{ role: string; content: string }>
+      messages: Array<{ role: string; content: string }>,
+      tools?: ToolDefinition[],
     ): Promise<LLMResponse> => {
       const response = await client.chat.completions.create({
         model: config.model,
         messages: messages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+        ...(tools && tools.length > 0 ? { tools: toOpenAITools(tools) } : {}),
       });
 
       const choice = response.choices[0];
