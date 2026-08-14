@@ -14,15 +14,15 @@ import { createSandbox } from '../governance/sandbox';
 import { createGovernancePipeline } from '../governance/pipeline';
 import { createAuditLogger } from '../governance/audit';
 import { GuardrailRule } from '../governance/rules';
-import { createMemoryStore } from '../memory/store';
-import { createMemoryRetriever } from '../memory/retriever';
 import { createMockLLM } from '../llm/mock';
 import { createLLMProvider } from '../llm/factory';
 import { createAgentLoop } from '../core/loop';
+import { createChatLoop } from '../core/chat';
 import { createCredentialManager } from '../credential/manager';
-import { AgentAction, ConversationTurn } from '../core/types';
+import { AgentAction, ConversationTurn, AgentConfig } from '../core/types';
 import { parse } from 'yaml';
 import * as readline from 'readline';
+import * as readlinePromises from 'readline/promises';
 import { parseSessionState } from './session';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -120,6 +120,65 @@ program
   .description('Coding Agent Harness - CLI coding agent for autonomous development')
   .version('1.0.0');
 
+interface HarnessSetup {
+  config: AgentConfig;
+  registry: ReturnType<typeof createToolRegistry>;
+  pipeline: ReturnType<typeof createGovernancePipeline>;
+  hitl: ReturnType<typeof createHITL>;
+  audit: ReturnType<typeof createAuditLogger>;
+  watcher: ReturnType<typeof createGuardrailWatcher>;
+  credManager: ReturnType<typeof createCredentialManager>;
+}
+
+async function setupHarness(configPath: string, workspace: string): Promise<HarnessSetup> {
+  console.log('Loading config...');
+  const config = loadConfig(configPath);
+  console.log(`LLM Provider: ${config.llm.provider}, Model: ${config.llm.model}`);
+
+  console.log('Registering tools...');
+  const registry = createToolRegistry();
+  registry.register(createReadFileTool(workspace));
+  registry.register(createWriteFileTool(workspace));
+  registry.register(createShellTool());
+  registry.register(createTestRunnerTool());
+  registry.register(createLintTool());
+  console.log(`Registered ${registry.list().length} tools`);
+
+  console.log('Loading guardrail rules...');
+  let rules: GuardrailRule[] = [];
+  const rulesPath = join(workspace, config.governance.rulesFile);
+  if (existsSync(rulesPath)) {
+    const rulesContent = readFileSync(rulesPath, 'utf-8');
+    const parsed = parse(rulesContent);
+    if (parsed && typeof parsed === 'object' && 'rules' in parsed) {
+      rules = (parsed as { rules: GuardrailRule[] }).rules;
+    }
+  }
+  console.log(`Loaded ${rules.length} guardrail rules`);
+
+  const guardrail = createGuardrailEngine(rules);
+  const watcher = createGuardrailWatcher(rulesPath, guardrail);
+  watcher.start();
+
+  const hitl = createHITL();
+  const sandbox = createSandbox(
+    config.governance.sandbox.allowedPaths,
+    config.governance.sandbox.allowedCommands,
+  );
+  const pipeline = createGovernancePipeline(guardrail, hitl, sandbox);
+
+  const audit = createAuditLogger(join(workspace, '.harness/audit.log'));
+
+  const credManager = createCredentialManager(
+    join(workspace, '.harness/credentials'),
+    process.env.HARNESS_MASTER_PASSWORD,
+  );
+  const credStatus = await credManager.status();
+  console.log(`Credentials: ${credStatus[config.llm.provider] ? 'configured' : 'not configured'}`);
+
+  return { config, registry, pipeline, hitl, audit, watcher, credManager };
+}
+
 program
   .command('run <task>')
   .description('Execute a coding task')
@@ -129,55 +188,9 @@ program
   .option('-v, --verbose', 'Print full prompt and response')
   .option('--dry-run', 'Plan actions without executing them')
   .action(async (task: string, options: { config: string; workspace: string; mock: boolean; verbose: boolean; dryRun: boolean }) => {
-    const configPath = options.config;
-    const workspace = options.workspace;
     const verbose = options.verbose;
     const dryRun = options.dryRun;
-
-    console.log('Loading config...');
-    const config = loadConfig(configPath);
-    console.log(`LLM Provider: ${config.llm.provider}, Model: ${config.llm.model}`);
-
-    console.log('Registering tools...');
-    const registry = createToolRegistry();
-    registry.register(createReadFileTool(workspace));
-    registry.register(createWriteFileTool(workspace));
-    registry.register(createShellTool());
-    registry.register(createTestRunnerTool());
-    registry.register(createLintTool());
-    console.log(`Registered ${registry.list().length} tools`);
-
-    console.log('Loading guardrail rules...');
-    let rules: GuardrailRule[] = [];
-    const rulesPath = join(workspace, config.governance.rulesFile);
-    if (existsSync(rulesPath)) {
-      const rulesContent = readFileSync(rulesPath, 'utf-8');
-      const parsed = parse(rulesContent);
-      if (parsed && typeof parsed === 'object' && 'rules' in parsed) {
-        rules = (parsed as { rules: GuardrailRule[] }).rules;
-      }
-    }
-    console.log(`Loaded ${rules.length} guardrail rules`);
-
-    const guardrail = createGuardrailEngine(rules);
-    const guardrailWatcher = createGuardrailWatcher(rulesPath, guardrail);
-    guardrailWatcher.start();
-
-    const hitl = createHITL();
-    const sandbox = createSandbox(
-      config.governance.sandbox.allowedPaths,
-      config.governance.sandbox.allowedCommands,
-    );
-    const pipeline = createGovernancePipeline(guardrail, hitl, sandbox);
-
-    const audit = createAuditLogger(join(workspace, '.harness/audit.log'));
-
-    const credManager = createCredentialManager(
-      join(workspace, '.harness/credentials'),
-      process.env.HARNESS_MASTER_PASSWORD,
-    );
-    const credStatus = await credManager.status();
-    console.log(`Credentials: ${credStatus[config.llm.provider] ? 'configured' : 'not configured'}`);
+    const { config, registry, pipeline, hitl, audit, watcher, credManager } = await setupHarness(options.config, options.workspace);
 
     let llm;
     if (options.mock) {
@@ -196,9 +209,6 @@ program
       console.log(`Connecting to ${config.llm.provider}...`);
       llm = await createLLMProvider(config.llm, credManager);
     }
-
-    const memoryStore = await createMemoryStore(join(workspace, config.memory.storagePath));
-    const memoryRetriever = createMemoryRetriever(memoryStore);
 
     const agent = createAgentLoop(config, llm, registry.list(), {
       onAction: async (action: AgentAction, turn: number) => {
@@ -275,8 +285,91 @@ program
       process.exitCode = 1;
     } finally {
       // 关闭护栏文件监听，避免 fs.watch 让进程在任务结束后无法退出。
-      guardrailWatcher.stop();
+      watcher.stop();
     }
+  });
+
+program
+  .command('chat', { isDefault: true })
+  .description('进入交互式对话模式')
+  .option('-c, --config <path>', 'Config file path', '.harness/config.yaml')
+  .option('-w, --workspace <path>', 'Workspace root path', process.cwd())
+  .option('-m, --mock', 'Use mock LLM provider instead of real API')
+  .option('-v, --verbose', 'Print full prompt and response')
+  .action(async (options: { config: string; workspace: string; mock: boolean; verbose: boolean }) => {
+    const verbose = options.verbose;
+    const { config, registry, pipeline, hitl, audit, watcher, credManager } = await setupHarness(options.config, options.workspace);
+
+    let llm;
+    if (options.mock) {
+      console.log('Using mock LLM provider');
+      llm = createMockLLM([
+        { content: 'Hello! I am a mock assistant in chat mode. (mock responses are limited)' },
+      ]);
+    } else {
+      console.log(`Connecting to ${config.llm.provider}...`);
+      llm = await createLLMProvider(config.llm, credManager);
+    }
+
+    const rl = readlinePromises.createInterface({ input: process.stdin, output: process.stdout });
+    // stdin 关闭(EOF)时停止护栏监听，避免非 TTY 下 question 挂起导致进程无法退出。
+    rl.on('close', () => watcher.stop());
+
+    const chat = createChatLoop(config, llm, registry.list(), {
+      onAction: async (action: AgentAction) => {
+        console.log(`  Action: ${action.type} ${JSON.stringify(action.params)}`);
+        const result = pipeline.process(action);
+        audit.log({
+          timestamp: Date.now(),
+          action: { type: action.type, params: action.params },
+          result: {
+            allowed: result.allowed,
+            reason: result.reason,
+            requiresApproval: result.requiresApproval,
+          },
+        });
+        if (!result.allowed) {
+          if (result.requiresApproval) {
+            const answer = await rl.question(`  [HITL] Approve ${action.type}? (y/N): `);
+            if (answer.toLowerCase().startsWith('y')) {
+              hitl.approve();
+              return { allowed: true };
+            }
+            hitl.reject('User denied');
+            return { allowed: false, reason: 'User denied' };
+          }
+          console.log(`  Guardrail blocked: ${result.reason}`);
+        }
+        return { allowed: result.allowed, reason: result.reason };
+      },
+      onMessage: (messages: Array<{ role: string; content: string }>) => {
+        if (verbose) {
+          console.log('\n--- Messages sent to LLM ---');
+          for (const msg of messages) {
+            console.log(`[${msg.role}]: ${msg.content}`);
+          }
+          console.log('--- End of messages ---\n');
+        }
+      },
+    });
+
+    console.log('\nEntering chat mode. Type "exit" to quit.\n');
+
+    try {
+      while (true) {
+        const input = (await rl.question('> ')).trim();
+        if (!input) continue;
+        if (['exit', 'quit', 'q'].includes(input.toLowerCase())) break;
+
+        const reply = await chat.send(input);
+        console.log(`\n${reply}\n`);
+      }
+    } finally {
+      rl.close();
+      watcher.stop();
+    }
+
+    console.log('Goodbye!');
   });
 
 program

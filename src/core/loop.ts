@@ -57,14 +57,22 @@ function appendTurnMessages(
   });
 }
 
-function parseResponse(content: string, toolCalls?: Array<{ name: string; arguments: Record<string, string> }>): { action?: AgentAction; done?: boolean; summary?: string } | null {
+export type ParsedResponse =
+  | { kind: 'action'; action: AgentAction }
+  | { kind: 'done'; summary: string }
+  | { kind: 'text'; text: string };
+
+export function parseResponse(
+  content: string,
+  toolCalls?: Array<{ name: string; arguments: Record<string, string> }>,
+): ParsedResponse {
   if (toolCalls && toolCalls.length > 0) {
     const tc = toolCalls[0];
-    return { action: { type: tc.name as AgentAction['type'], params: tc.arguments } };
+    return { kind: 'action', action: { type: tc.name as AgentAction['type'], params: tc.arguments } };
   }
 
   const trimmed = content.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return { kind: 'text', text: '' };
 
   let jsonStr = trimmed;
 
@@ -76,18 +84,18 @@ function parseResponse(content: string, toolCalls?: Array<{ name: string; argume
   try {
     const parsed = JSON.parse(jsonStr);
     if (parsed.action && parsed.action.type && parsed.action.params) {
-      return { action: parsed.action };
+      return { kind: 'action', action: parsed.action };
     }
     if (parsed.done) {
-      return { done: true, summary: parsed.summary || '' };
+      return { kind: 'done', summary: parsed.summary || '' };
     }
-    return null;
+    return { kind: 'text', text: trimmed };
   } catch {
-    return null;
+    return { kind: 'text', text: trimmed };
   }
 }
 
-function executeAction(tools: ToolDefinition[], action: AgentAction): Promise<ActionResult> {
+export function executeAction(tools: ToolDefinition[], action: AgentAction): Promise<ActionResult> {
   const tool = tools.find((t) => t.name === action.type);
   if (!tool) {
     return Promise.resolve({
@@ -163,7 +171,7 @@ export function createAgentLoop(
 
           const parsed = parseResponse(response.content, response.toolCalls);
 
-          if (!parsed) {
+          if (parsed.kind === 'text') {
             if (parseAttempts === 0) {
               parseAttempts++;
               messages.push({ role: 'user', content: 'Your response was not in the expected JSON format. Please respond with valid JSON.' });
@@ -174,14 +182,14 @@ export function createAgentLoop(
             break;
           }
 
-          if (parsed.done) {
-            summary = parsed.summary || '';
+          if (parsed.kind === 'done') {
+            summary = parsed.summary;
             state = 'completed';
             callbacks.onStop?.('done signal');
             break;
           }
 
-          if (parsed.action) {
+          if (parsed.kind === 'action') {
             const action = parsed.action;
 
             const approval = await callbacks.onAction?.(action, turns);
