@@ -1476,6 +1476,47 @@ git commit -m "docs: README 完整文档"
 
 ---
 
+### Task 28: 交互式对话模式（Chat REPL）
+
+**依赖:** Task 1, Task 2, Task 4, Task 21 | **Worktree:** wt-chat
+
+**Files:**
+- Create: `src/core/chat.ts`, `tests/core/chat.test.ts`
+- Modify: `src/core/loop.ts`（导出 `parseResponse` 三态 + `executeAction`）, `src/cli/index.ts`（提取 `setupHarness` + 新增 `chat` 命令）
+
+**Interfaces:**
+- Consumes: `parseResponse`, `executeAction`, `trimConversationHistory`, `AgentCallbacks` from loop；`AgentConfig`, `LLMProvider`, `ToolDefinition` from types
+- Produces: `createChatLoop(config, llm, tools, callbacks): { send(userInput): Promise<string> }`
+
+- [ ] **Step 1: 改造 parseResponse 为三态**
+
+`src/core/loop.ts`：将 `parseResponse` 返回类型改为 `{ kind: 'action' | 'done' | 'text' }` 三态并导出，让 LLM 既能返回动作也能自由文本回复；`run` 循环的「不可解析」分支改为 `kind === 'text'`（等价原 null 分支，行为不变）；导出 `executeAction` 供 chat 复用。
+
+- [ ] **Step 2: 实现 chat 循环**
+
+`src/core/chat.ts`：`buildChatSystemPrompt`（对话式 prompt：可直接文本回复，或返回 JSON action 调工具）+ `createChatLoop`（跨轮次维护 `messages` 数组，`send()` 内做单轮 agentic 子循环：action → 治理 → 执行 → 回灌 → 继续，直到文本回复或 done）。
+
+- [ ] **Step 3: CLI 集成**
+
+`src/cli/index.ts`：提取 `setupHarness` 公共初始化（消除 run/chat 约 130 行重复）；新增 `chat` 命令（`isDefault: true` 使无参数 `harness` 也进入对话），readline 主循环 + 审批复用同一 readline（不再让 hitl 自建 readline 抢 stdin）+ `close` 事件兜底保证非 TTY 下进程能退出。
+
+- [ ] **Step 4: 测试与验证**
+
+`tests/core/chat.test.ts`：纯文本回复、action 执行、多步工具、跨轮次上下文累积、审批拒绝、done 信号、单轮动作数超限保护。
+
+```bash
+npm test   # 全部通过（含新增 chat 测试）
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add src/core/chat.ts src/core/loop.ts src/cli/index.ts tests/core/chat.test.ts
+git commit -m "feat: 交互式对话模式（chat REPL，多轮上下文 + 工具执行）"
+```
+
+---
+
 ## 验收检查清单
 
 - [ ] `npm test` 一键运行所有 mock-LLM 单元测试且全部通过
@@ -1486,3 +1527,4 @@ git commit -m "docs: README 完整文档"
 - [ ] 反馈闭环可用 mock LLM 确定性验证
 - [ ] 所有凭据未硬编码、未提交 Git
 - [ ] 项目可在全新机器上从零运行（clone → npm install → npm test）
+- [ ] `harness`（无参数）进入交互式对话，多轮有上下文，`exit` 进程自然退出

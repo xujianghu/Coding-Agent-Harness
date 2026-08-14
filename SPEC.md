@@ -31,6 +31,7 @@
 5. **作为开发者**，agent 应记住跨会话的项目约定和重要决策，下次启动时自动加载，避免我重复说明。
 6. **作为运维者**，我可以通过 `docker pull && docker run` 一键启动 agent，并在 README 中找到完整的 key 配置说明。
 7. **作为学习者**，我可以运行 `make test` 一键执行所有 mock-LLM 确定性单元测试，验证 harness 的每个核心机制——无需真实 LLM 或网络。
+8. **作为开发者**，我可以输入 `harness`（无参数）直接进入交互式对话，连续多轮向 agent 提问或下达任务，agent 记住前文上下文，既能文字回复也能调用工具执行编码操作。
 
 ---
 
@@ -146,6 +147,20 @@ rules:
 - `harness key status`：显示各供应商 Key 状态（不显示明文）
 - `harness key clear <provider>`：确认后删除
 
+### 3.9 交互式对话模式（Chat REPL）
+
+**输入**：`harness`（无参数，作为默认命令）或 `harness chat` 进入交互式会话  
+**行为**：
+1. 维护一个跨轮次的对话上下文（进程内，退出即清空）
+2. 每轮用户输入 → 组装上下文 → 调用 LLM
+3. LLM 可自由文本回复，也可返回 JSON action 调用工具
+4. 工具动作经治理管道检查（含 HITL 审批）后执行，结果回灌上下文
+5. 继续等待下一轮输入，直到 `exit` / `quit` / `q` 退出
+
+**输出**：每轮回复文本；工具执行结果；退出时进程自然终止  
+**边界条件**：单轮动作数受 `agent.maxTurns` 限制；上下文按 `memory.maxConversationTurns` 裁剪  
+**错误处理**：EOF / 非 TTY 环境通过 readline `close` 事件兜底，保证进程退出不死锁
+
 ---
 
 ## 四、非功能性需求
@@ -189,7 +204,7 @@ rules:
 ```
 ┌─────────────────────────────────────────┐
 │              CLI 入口层                  │
-│         (harness "你的任务")             │
+│  (harness run / harness chat 对话)       │
 ├─────────────────────────────────────────┤
 │             Agent 主循环                 │
 │  context → LLM → parse → dispatch →     │
@@ -239,6 +254,12 @@ interface AgentAction {
   type: 'read_file' | 'write_file' | 'shell_exec' | 'run_test' | 'run_lint';
   params: Record<string, string>;
 }
+
+// LLM 输出解析的三态结果（对话模式区分「说话 / 调工具 / 结束」）
+type ParsedResponse =
+  | { kind: 'action'; action: AgentAction }
+  | { kind: 'done'; summary: string }
+  | { kind: 'text'; text: string };
 
 interface ActionResult {
   success: boolean;
@@ -412,6 +433,7 @@ harness "实现一个快速排序函数"
 | 机制演示 | 三个演示脚本全部用 mock LLM 驱动，确定性通过 |
 | CI | `make test` 一键运行所有测试，CI 绿勾 |
 | 分发 | Docker build 成功，`docker run` 可启动 |
+| 交互式对话 | `harness` 进入 chat，多轮上下文对话 + 工具调用，`exit` 进程自然退出 |
 
 ---
 
