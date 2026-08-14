@@ -19,7 +19,7 @@ import { createLLMProvider } from '../llm/factory';
 import { createAgentLoop } from '../core/loop';
 import { createChatLoop } from '../core/chat';
 import { createCredentialManager } from '../credential/manager';
-import { AgentAction, ConversationTurn, AgentConfig } from '../core/types';
+import { AgentAction, ConversationTurn, AgentConfig, LLMResponse } from '../core/types';
 import { parse } from 'yaml';
 import * as readline from 'readline';
 import * as readlinePromises from 'readline/promises';
@@ -179,6 +179,28 @@ async function setupHarness(configPath: string, workspace: string): Promise<Harn
   return { config, registry, pipeline, hitl, audit, watcher, credManager };
 }
 
+async function resolveLLM(
+  config: AgentConfig,
+  credManager: ReturnType<typeof createCredentialManager>,
+  opts: { mock: boolean; mockResponses: LLMResponse[] },
+): Promise<ReturnType<typeof createLLMProvider>> {
+  if (opts.mock) {
+    console.log('Using mock LLM provider');
+    return createMockLLM(opts.mockResponses);
+  }
+
+  console.log(`Connecting to ${config.llm.provider}...`);
+  try {
+    return await createLLMProvider(config.llm, credManager);
+  } catch (error) {
+    const provider = config.llm.provider;
+    console.error(`\n无法连接 ${provider}：${(error as Error).message}`);
+    console.error(`请先配置 API Key：harness key set ${provider}`);
+    console.error('或设置环境变量 OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY。');
+    process.exit(1);
+  }
+}
+
 program
   .command('run <task>')
   .description('Execute a coding task')
@@ -192,10 +214,9 @@ program
     const dryRun = options.dryRun;
     const { config, registry, pipeline, hitl, audit, watcher, credManager } = await setupHarness(options.config, options.workspace);
 
-    let llm;
-    if (options.mock) {
-      console.log('Using mock LLM provider');
-      llm = createMockLLM([
+    const llm = await resolveLLM(config, credManager, {
+      mock: options.mock,
+      mockResponses: [
         {
           content: `\`\`\`json\n{"action": {"type": "read_file", "params": {"path": "package.json"}}}\n\`\`\``,
           usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
@@ -204,11 +225,8 @@ program
           content: `\`\`\`json\n{"done": true, "summary": "Task completed successfully"}\n\`\`\``,
           usage: { promptTokens: 200, completionTokens: 30, totalTokens: 230 },
         },
-      ]);
-    } else {
-      console.log(`Connecting to ${config.llm.provider}...`);
-      llm = await createLLMProvider(config.llm, credManager);
-    }
+      ],
+    });
 
     const agent = createAgentLoop(config, llm, registry.list(), {
       onAction: async (action: AgentAction, turn: number) => {
@@ -300,16 +318,12 @@ program
     const verbose = options.verbose;
     const { config, registry, pipeline, hitl, audit, watcher, credManager } = await setupHarness(options.config, options.workspace);
 
-    let llm;
-    if (options.mock) {
-      console.log('Using mock LLM provider');
-      llm = createMockLLM([
+    const llm = await resolveLLM(config, credManager, {
+      mock: options.mock,
+      mockResponses: [
         { content: 'Hello! I am a mock assistant in chat mode. (mock responses are limited)' },
-      ]);
-    } else {
-      console.log(`Connecting to ${config.llm.provider}...`);
-      llm = await createLLMProvider(config.llm, credManager);
-    }
+      ],
+    });
 
     const rl = readlinePromises.createInterface({ input: process.stdin, output: process.stdout });
     // stdin 关闭(EOF)时停止护栏监听，避免非 TTY 下 question 挂起导致进程无法退出。
