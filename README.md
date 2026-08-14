@@ -124,9 +124,10 @@ harness key clear openai
 ## Key 安全配置
 
 - 所有 API Key 存储在 `.harness/credentials/credentials.json`，该路径已加入 `.gitignore`
+- 设置 `HARNESS_MASTER_PASSWORD` 环境变量后，Key 使用 **AES-256-GCM** 加密存储（随机 IV + 认证标签），主密码不落盘
+- **未设置主密码时退化为明文 JSON 存储**，启动时会打印告警——生产环境务必设置 `HARNESS_MASTER_PASSWORD`
 - 输入 Key 时**终端不回显明文**
 - `harness key status` 只显示 `configured` / `not configured`，**绝不输出明文 Key**
-- 推荐配合环境变量注入方案使用（后续版本支持）
 
 ## 接入 DeepSeek / 其他 OpenAI 兼容服务
 
@@ -198,7 +199,7 @@ demo/             # 机制演示脚本
 
 - 纯 CLI 工具，无 WebUI
 - 需要 Node.js 20+
-- 凭据存储为本地 JSON 文件（`.harness/credentials/credentials.json`）
+- 凭据默认存本地 JSON 文件；设置 `HARNESS_MASTER_PASSWORD` 后 AES-256-GCM 加密
 - 护栏规则为静态正则匹配，不支持语义分析
 - 真实 LLM 适配已实现（OpenAI / Anthropic / Gemini，以及通过 `baseUrl` 接入的 DeepSeek 等 OpenAI 兼容服务），需自备 API key
 

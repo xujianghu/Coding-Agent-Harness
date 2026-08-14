@@ -133,9 +133,9 @@ rules:
 
 ### 3.8 凭据管理
 
-**安全存储**：优先使用操作系统钥匙串（Windows Credential Manager / macOS Keychain），`.env` 文件仅作后备  
+**安全存储**：AES-256-GCM 加密文件（主密码来自 `HARNESS_MASTER_PASSWORD` 环境变量），未设置主密码时退化为明文存储并在启动时告警  
 **命令**：
-- `harness key set <provider>`：隐藏输入 → 存入钥匙串
+- `harness key set <provider>`：隐藏输入 → 加密存入 `.harness/credentials/`
 - `harness key status`：显示各供应商 Key 状态（不显示明文）
 - `harness key clear <provider>`：确认后删除
 
@@ -169,7 +169,7 @@ rules:
 |------|------|
 | Git 提交泄露 | `.gitignore` + pre-commit hook 扫描 |
 | 日志/终端泄露 | 自动脱敏，Key 查看只显示前后 4 位 |
-| 进程环境可见 | 优先钥匙串，`.env` 标注风险 |
+| 进程环境可见 | AES 加密文件，`.env` 标注明文风险 |
 | 首次录入 | 隐藏输入 + 二次确认 |
 
 #### 运行安全
@@ -233,7 +233,7 @@ rules:
 ### 5.3 外部依赖
 - OpenAI API / Anthropic API / Google Gemini API
 - ESLint / TypeScript Compiler（用于 Lint/类型检查）
-- 系统钥匙串（Windows Credential Manager / macOS Keychain）
+- Node.js `crypto` 模块（AES-256-GCM 加密凭据文件）
 
 ---
 
@@ -243,7 +243,7 @@ rules:
 
 ```typescript
 interface AgentAction {
-  type: 'read_file' | 'write_file' | 'shell_exec' | 'run_test' | 'run_lint';
+  type: 'read_file' | 'write_file' | 'delete_file' | 'shell_exec' | 'run_test' | 'run_lint';
   params: Record<string, string>;
 }
 
@@ -267,26 +267,12 @@ interface GuardrailResult {
   requiresApproval?: boolean;
 }
 
-interface FeedbackSignal {
-  type: 'test' | 'lint' | 'typecheck' | 'guardrail';
-  passed: boolean;
-  details: Array<{ file: string; line: number; message: string }>;
-  summary: string;
-}
-
 interface ConversationTurn {
-  role: 'user' | 'assistant' | 'system' | 'feedback';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
   action?: AgentAction;
   result?: ActionResult;
-}
-
-interface MemoryEntry {
-  key: string;
-  value: string;
-  category: 'convention' | 'decision' | 'structure';
-  timestamp: number;
 }
 ```
 
@@ -321,16 +307,15 @@ memory:
 
 ### 7.1 Key 存储方案
 
-**主方案**：操作系统钥匙串
-- Windows: Credential Manager（通过 `keytar` 或 `wincred` 库）
-- macOS: Keychain（通过 `keytar` 库）
-- Linux: Secret Service / 加密文件后备
+**主方案**：AES-256-GCM 加密文件（主密码来自 `HARNESS_MASTER_PASSWORD` 环境变量）
+- 加密算法：AES-256-GCM，随机 16 字节 IV，认证标签防篡改
+- 主密码经 `scryptSync` 派生 32 字节密钥，不落盘
 
-**后备方案**：AES-256 加密文件（主密码保护）
+**后备方案**：未设置主密码时退化为明文 JSON 存储（启动时打印告警）
 
 **命令接口**：
 ```bash
-harness key set openai     # 隐藏输入 → 存入钥匙串
+harness key set openai     # 隐藏输入 → 加密存入 .harness/credentials/
 harness key status          # 显示各供应商状态（不显示明文）
 harness key clear openai    # 确认后删除
 ```
@@ -365,7 +350,7 @@ harness "实现一个快速排序函数"
 | 配置格式 | YAML | 可读性好、支持注释、生态成熟 |
 | 测试框架 | Vitest | 快速、与 TypeScript 原生集成、兼容 Jest |
 | CLI 框架 | Commander.js | 轻量、成熟、TypeScript 友好 |
-| 凭据存储 | keytar | 跨平台钥匙串访问 |
+| 凭据存储 | Node.js `crypto`（AES-256-GCM） | 零原生依赖的加密文件存储 |
 | 分发 | Docker + npm | Docker 环境一致、npm 分发便捷 |
 | CI/CD | GitHub Actions | 免费、与 GitHub 仓库集成 |
 
@@ -431,7 +416,7 @@ harness "实现一个快速排序函数"
 
 ## 十一、风险与未决问题
 
-1. **跨平台钥匙串兼容性**：keytar 在 Linux 上需要 libsecret 依赖，可能需要加密文件后备方案
+1. **主密码丢失风险**：`HARNESS_MASTER_PASSWORD` 丢失后凭据无法解密，需引导用户妥善保存主密码
 2. **LLM 输出解析鲁棒性**：不同供应商的响应格式差异可能影响动作解析，需要充分的格式容错
 3. **护栏规则覆盖面**：初期规则集可能不够全面，需要设计为可扩展的规则框架
 4. **冷启动验证**：用另一个 agent 验证 SPEC 时可能暴露未明确定义的假设

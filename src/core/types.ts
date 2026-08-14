@@ -25,7 +25,7 @@ export interface PipelineResult {
 }
 
 export interface ConversationTurn {
-  role: 'user' | 'assistant' | 'system' | 'feedback';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
   action?: AgentAction;
