@@ -1,41 +1,32 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
-import { resolve, join, dirname } from 'path';
+import { dirname } from 'path';
 import type { ToolDefinition, ActionResult } from '../core/types';
+import { resolveWorkspacePath } from './path';
 
-const MAX_FILE_SIZE = 1 * 1024 * 1024;
+const MAX_FILE_SIZE = 1024 * 1024;
 
-const SENSITIVE_PATH_PATTERNS = [
-  /(^|[\\/])\.git[\\/]config$/,
-  /(^|[\\/])\.harness[\\/]credentials[\\/]/,
-  /(^|[\\/])\.env(?:[.][\w-]+)?$/,
-  /[.]key$/,
-];
-
-function isSensitivePath(filePath: string): boolean {
-  const normalized = filePath.replace(/\\/g, '/');
-  return SENSITIVE_PATH_PATTERNS.some((pattern) => pattern.test(normalized));
+function failure(error: unknown): ActionResult {
+  return { success: false, output: '', error: error instanceof Error ? error.message : String(error) };
 }
 
 export function createReadFileTool(workspaceRoot: string): ToolDefinition {
   return {
     name: 'read_file',
-    description: 'Reads a file from the workspace',
+    description: '读取工作区文件，最多 1 MB',
     parameters: {
-      path: { type: 'string', description: 'Path relative to workspace root', required: true },
+      path: { type: 'string', description: '相对于工作区根目录的文件路径', required: true },
     },
-    execute: async (params: Record<string, string>): Promise<ActionResult> => {
-      const filePath = resolve(join(workspaceRoot, params.path));
-      if (!filePath.startsWith(resolve(workspaceRoot))) {
-        return { success: false, output: '', error: 'Path traversal detected' };
+    execute: async (params): Promise<ActionResult> => {
+      try {
+        const filePath = resolveWorkspacePath(workspaceRoot, params.path);
+        if (!existsSync(filePath)) return failure(`File not found: ${params.path}`);
+        const stat = statSync(filePath);
+        if (!stat.isFile()) return failure(`Path is a directory or non-regular file: ${params.path}`);
+        if (stat.size > MAX_FILE_SIZE) return failure(`File size ${stat.size} exceeds max ${MAX_FILE_SIZE}`);
+        return { success: true, output: readFileSync(filePath, 'utf-8') };
+      } catch (error) {
+        return failure(error);
       }
-      if (!existsSync(filePath)) {
-        return { success: false, output: '', error: `File not found: ${params.path}` };
-      }
-      if (statSync(filePath).isDirectory()) {
-        return { success: false, output: '', error: `Path is a directory: ${params.path}` };
-      }
-      const content = readFileSync(filePath, 'utf-8');
-      return { success: true, output: content };
     },
   };
 }
@@ -43,29 +34,26 @@ export function createReadFileTool(workspaceRoot: string): ToolDefinition {
 export function createWriteFileTool(workspaceRoot: string): ToolDefinition {
   return {
     name: 'write_file',
-    description: 'Writes content to a file in the workspace',
+    description: '在工作区写入文件，最多 1 MB',
     parameters: {
-      path: { type: 'string', description: 'Path relative to workspace root', required: true },
-      content: { type: 'string', description: 'Content to write', required: true },
+      path: { type: 'string', description: '相对于工作区根目录的文件路径', required: true },
+      content: { type: 'string', description: '要写入的文件内容', required: true },
     },
-    execute: async (params: Record<string, string>): Promise<ActionResult> => {
-      if (!params.path || params.path.trim() === '') {
-        return { success: false, output: '', error: 'Path is required' };
+    execute: async (params): Promise<ActionResult> => {
+      try {
+        const filePath = resolveWorkspacePath(workspaceRoot, params.path);
+        if (typeof params.content !== 'string') return failure('Content must be a string');
+        const contentSize = Buffer.byteLength(params.content, 'utf-8');
+        if (contentSize > MAX_FILE_SIZE) return failure(`Content size ${contentSize} exceeds max ${MAX_FILE_SIZE}`);
+        mkdirSync(dirname(filePath), { recursive: true });
+        // 创建目录后再次检查，保持执行边界与治理边界一致。
+        const checkedPath = resolveWorkspacePath(workspaceRoot, params.path);
+        if (existsSync(checkedPath) && !statSync(checkedPath).isFile()) return failure(`Path is a directory or non-regular file: ${params.path}`);
+        writeFileSync(checkedPath, params.content, 'utf-8');
+        return { success: true, output: 'File written' };
+      } catch (error) {
+        return failure(error);
       }
-      if (isSensitivePath(params.path)) {
-        return { success: false, output: '', error: `Sensitive path is blocked: ${params.path}` };
-      }
-      const contentSize = Buffer.byteLength(params.content, 'utf-8');
-      if (contentSize > MAX_FILE_SIZE) {
-        return { success: false, output: '', error: `Content size ${contentSize} exceeds max ${MAX_FILE_SIZE}` };
-      }
-      const filePath = resolve(join(workspaceRoot, params.path));
-      if (!filePath.startsWith(resolve(workspaceRoot))) {
-        return { success: false, output: '', error: 'Path traversal detected' };
-      }
-      mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, params.content, 'utf-8');
-      return { success: true, output: 'File written' };
     },
   };
 }
@@ -73,29 +61,20 @@ export function createWriteFileTool(workspaceRoot: string): ToolDefinition {
 export function createDeleteFileTool(workspaceRoot: string): ToolDefinition {
   return {
     name: 'delete_file',
-    description: 'Deletes a file from the workspace',
+    description: '删除工作区中的普通文件',
     parameters: {
-      path: { type: 'string', description: 'Path relative to workspace root', required: true },
+      path: { type: 'string', description: '相对于工作区根目录的文件路径', required: true },
     },
-    execute: async (params: Record<string, string>): Promise<ActionResult> => {
-      if (!params.path || params.path.trim() === '') {
-        return { success: false, output: '', error: 'Path is required' };
+    execute: async (params): Promise<ActionResult> => {
+      try {
+        const filePath = resolveWorkspacePath(workspaceRoot, params.path);
+        if (!existsSync(filePath)) return failure(`File not found: ${params.path}`);
+        if (!statSync(filePath).isFile()) return failure(`Path is a directory or non-regular file: ${params.path}`);
+        unlinkSync(filePath);
+        return { success: true, output: 'File deleted' };
+      } catch (error) {
+        return failure(error);
       }
-      if (isSensitivePath(params.path)) {
-        return { success: false, output: '', error: `Sensitive path is blocked: ${params.path}` };
-      }
-      const filePath = resolve(join(workspaceRoot, params.path));
-      if (!filePath.startsWith(resolve(workspaceRoot))) {
-        return { success: false, output: '', error: 'Path traversal detected' };
-      }
-      if (!existsSync(filePath)) {
-        return { success: false, output: '', error: `File not found: ${params.path}` };
-      }
-      if (statSync(filePath).isDirectory()) {
-        return { success: false, output: '', error: `Path is a directory: ${params.path}` };
-      }
-      unlinkSync(filePath);
-      return { success: true, output: 'File deleted' };
     },
   };
 }

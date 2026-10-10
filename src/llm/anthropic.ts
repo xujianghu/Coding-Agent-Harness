@@ -1,5 +1,23 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { LLMProvider, LLMResponse, ToolDefinition } from '../core/types';
+import { LLMProvider, LLMResponse, ToolDefinition, LLMMessage, LLMCompletionOptions } from '../core/types';
+
+function toMessages(messages: LLMMessage[]): Anthropic.MessageParam[] {
+  const converted: Anthropic.MessageParam[] = [];
+  for (const message of messages.filter(m => m.role !== 'system')) {
+    if (message.role === 'tool') {
+      const block: Anthropic.ToolResultBlockParam = { type: 'tool_result', tool_use_id: message.toolCallId!, content: message.content };
+      const previous = converted[converted.length - 1];
+      if (previous?.role === 'user' && Array.isArray(previous.content)) previous.content.push(block);
+      else converted.push({ role: 'user', content: [block] });
+    } else if (message.toolCalls?.length) {
+      converted.push({ role: 'assistant', content: [
+        ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+        ...message.toolCalls.map(call => ({ type: 'tool_use' as const, id: call.id!, name: call.name, input: call.arguments })),
+      ] });
+    } else converted.push({ role: message.role as 'user' | 'assistant', content: message.content });
+  }
+  return converted;
+}
 
 function toAnthropicTools(tools: ToolDefinition[]): Array<Record<string, unknown>> {
   return tools.map((t) => ({
@@ -24,27 +42,25 @@ export function createAnthropicProvider(config: {
   return {
     name: 'anthropic',
     complete: async (
-      messages: Array<{ role: string; content: string }>,
+      messages: LLMMessage[],
       tools?: ToolDefinition[],
+      options?: LLMCompletionOptions,
     ): Promise<LLMResponse> => {
       const systemMessage = messages.find((m) => m.role === 'system');
-      const nonSystemMessages = messages
-        .filter((m) => m.role !== 'system')
-        .map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        }));
+      const nonSystemMessages = toMessages(messages);
 
       const params: {
         model: string;
-        messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+        messages: Anthropic.MessageParam[];
         system?: string;
         max_tokens: number;
         tools?: any[];
+        temperature?: number;
       } = {
         model: config.model,
         messages: nonSystemMessages,
-        max_tokens: 4096,
+        max_tokens: options?.maxTokens ?? 4096,
+        ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(tools && tools.length > 0 ? { tools: toAnthropicTools(tools) } : {}),
       };
 
@@ -52,7 +68,7 @@ export function createAnthropicProvider(config: {
         params.system = systemMessage.content;
       }
 
-      const response = await client.messages.create(params);
+      const response = await client.messages.create(params, ...options?.signal ? [{ signal: options.signal }] : []);
 
       const textContent = response.content.find((c) => c.type === 'text');
       const content = textContent?.text ?? '';
@@ -62,6 +78,7 @@ export function createAnthropicProvider(config: {
       const toolUseBlocks = response.content.filter((c) => c.type === 'tool_use');
       if (toolUseBlocks.length > 0) {
         result.toolCalls = toolUseBlocks.map((tu) => ({
+          ...(tu.id ? { id: tu.id } : {}),
           name: tu.name,
           arguments: tu.input as Record<string, string>,
         }));
@@ -78,27 +95,25 @@ export function createAnthropicProvider(config: {
       return result;
     },
     completeStream: async (
-      messages: Array<{ role: string; content: string }>,
-      onToken: (token: string) => void
+      messages: LLMMessage[],
+      onToken: (token: string) => void,
+      options?: LLMCompletionOptions,
     ): Promise<LLMResponse> => {
       const systemMessage = messages.find((m) => m.role === 'system');
-      const nonSystemMessages = messages
-        .filter((m) => m.role !== 'system')
-        .map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        }));
+      const nonSystemMessages = toMessages(messages);
 
       const params: {
         model: string;
-        messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+        messages: Anthropic.MessageParam[];
         system?: string;
         max_tokens: number;
         stream: boolean;
+        temperature?: number;
       } = {
         model: config.model,
         messages: nonSystemMessages,
-        max_tokens: 4096,
+        max_tokens: options?.maxTokens ?? 4096,
+        ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
         stream: true,
       };
 
@@ -106,7 +121,7 @@ export function createAnthropicProvider(config: {
         params.system = systemMessage.content;
       }
 
-      const stream = await client.messages.create(params) as unknown as AsyncIterable<any>;
+      const stream = await client.messages.create(params, ...options?.signal ? [{ signal: options.signal }] : []) as unknown as AsyncIterable<any>;
 
       let content = '';
       let inputTokens: number | undefined;

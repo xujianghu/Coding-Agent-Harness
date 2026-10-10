@@ -50,14 +50,14 @@ function makeShellTool(): ToolDefinition {
 
 describe('createAgentLoop', () => {
   describe('停机条件', () => {
-    it('1. MockLLM 返回空响应 → 循环停机，state=completed', async () => {
+    it('1. MockLLM 返回空响应 → 循环停机，state=error', async () => {
       const responses: LLMResponse[] = [{ content: '' }];
       const mockLLM = createMockLLM(responses);
       const loop = createAgentLoop(makeConfig(), mockLLM, [makeShellTool()], {});
 
       const result = await loop.run('do something');
 
-      expect(result.state).toBe('completed');
+      expect(result.state).toBe('error');
       expect(result.turns).toBe(1);
       expect(result.summary).toBe('');
     });
@@ -120,7 +120,7 @@ describe('createAgentLoop', () => {
       const result = await loop.run('do something');
 
       expect(onStop).toHaveBeenCalledWith('unparseable response');
-      expect(result.state).toBe('completed');
+      expect(result.state).toBe('error');
       expect(result.turns).toBe(2);
     });
   });
@@ -159,7 +159,7 @@ describe('createAgentLoop', () => {
       expect(turn.result).toBeDefined();
       expect(turn.result!.success).toBe(true);
 
-      expect(result.state).toBe('completed');
+      expect(result.state).toBe('error');
       expect(result.turns).toBe(2);
     });
 
@@ -202,7 +202,7 @@ describe('createAgentLoop', () => {
       const result = await loop.run('list files');
 
       expect(onAction).toHaveBeenCalledTimes(1);
-      expect(result.state).toBe('completed');
+      expect(result.state).toBe('error');
     });
   });
 

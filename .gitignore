@@ -5,6 +5,13 @@ dist/
 credentials.*
 .harness/memory/
 .harness/*.log
+.harness/credentials/
+.harness/sessions/
+.harness/runs/
+.harness/web-runs/
+.harness/web-demo/
+.harness/eval-results/
+eval-results/
 coverage/
 test-workspace/
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createReadFileTool, createWriteFileTool, createDeleteFileTool } from '../../src/tools/file';
-import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, symlinkSync, linkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { ToolDefinition } from '../../src/core/types';
@@ -65,6 +65,63 @@ describe('FileTools', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('File not found');
+  });
+
+  it.each(['.env', '.env.production', '.git/config', '.harness/credentials/token.json', 'private.key'])('敏感路径 %s 在读写删除工具中一致保护', async (path) => {
+    const filePath = join(workspaceRoot, path);
+    mkdirSync(join(filePath, '..'), { recursive: true });
+    writeFileSync(filePath, 'fixture-secret');
+    const results = await Promise.all([
+      readTool.execute({ path }),
+      writeTool.execute({ path, content: 'changed' }),
+      deleteTool.execute({ path }),
+    ]);
+    for (const result of results) {
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Sensitive path');
+    }
+    expect(readFileSync(filePath, 'utf-8')).toBe('fixture-secret');
+  });
+
+  it('工作区同名前缀不能绕过读写删除边界', async () => {
+    const path = `${workspaceRoot}-outside/file.txt`;
+    for (const tool of [readTool, writeTool, deleteTool]) {
+      const result = await tool.execute({ path, content: 'test' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Path traversal');
+    }
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('新文件路径的现有祖先为敏感目录别名时拒绝写入', async () => {
+    mkdirSync(join(workspaceRoot, '.harness'));
+    symlinkSync(join(workspaceRoot, '.harness'), join(workspaceRoot, 'alias'), 'junction');
+    const result = await writeTool.execute({ path: 'alias/nested/token.txt', content: 'secret' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Sensitive path');
+    expect(existsSync(join(workspaceRoot, '.harness', 'nested'))).toBe(false);
+  });
+
+  it('读取超过 1 MB 的文件不会把全部内容放入上下文', async () => {
+    writeFileSync(join(workspaceRoot, 'large-read.txt'), 'x'.repeat(1024 * 1024 + 1));
+    expect((await readTool.execute({ path: 'large-read.txt' })).error).toContain('exceeds max');
+  });
+
+  it('敏感文件的硬链接别名在读写删除工具中都拒绝执行', async () => {
+    writeFileSync(join(workspaceRoot, '.env'), 'fixture-secret');
+    linkSync(join(workspaceRoot, '.env'), join(workspaceRoot, 'alias.txt'));
+    for (const tool of [readTool, writeTool, deleteTool]) {
+      const result = await tool.execute({ path: 'alias.txt', content: 'changed' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Hard-linked');
+    }
+    expect(readFileSync(join(workspaceRoot, '.env'), 'utf-8')).toBe('fixture-secret');
+  });
+
+  it.runIf(process.platform === 'win32')('拒绝 Windows 文件流、设备名和尾部点', async () => {
+    for (const path of ['file.txt:secret', 'NUL', 'sub/COM1.txt', '.env.']) {
+      expect((await writeTool.execute({ path, content: 'changed' })).success).toBe(false);
+    }
   });
 
   it('写入文件后读取验证持久化', async () => {

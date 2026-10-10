@@ -1,27 +1,54 @@
 {
   "name": "coding-agent-harness",
-  "version": "1.0.0",
-  "description": "A CLI coding agent harness built from scratch",
+  "version": "1.1.0",
+  "description": "A verifiable and recoverable coding agent harness with isolated execution and reproducible evaluation",
   "main": "dist/cli/index.js",
-  "bin": { "harness": "./dist/cli/index.js" },
+  "bin": {
+    "harness": "./dist/cli/index.js",
+    "harness-eval": "./dist/eval/cli.js"
+  },
+  "engines": {
+    "node": "^22.12.0 || >=24"
+  },
+  "files": [
+    "dist",
+    "eval",
+    "docs",
+    "README.md",
+    "Dockerfile.sandbox"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:web",
+    "build:web": "tsc --noEmit -p frontend/tsconfig.json && vite build --config frontend/vite.config.mts",
+    "dev:web": "vite --config frontend/vite.config.mts",
+    "web": "node dist/cli/index.js web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:docker": "node scripts/docker-tests.cjs",
+    "test:package": "node scripts/pack-smoke.cjs",
+    "eval": "node dist/eval/cli.js",
+    "eval:smoke": "node dist/eval/cli.js --mock --mode all --repeat 1",
+    "check": "npm run build && npm test && npm run eval:smoke && npm run test:package",
     "demo": "npx tsx demo/01-guardrail-intercept.ts && npx tsx demo/02-feedback-loop.ts && npx tsx demo/03-deep-dimension.ts",
     "start": "node dist/cli/index.js"
   },
   "dependencies": {
-    "commander": "^12.0.0",
-    "yaml": "^2.4.0",
-    "openai": "^4.50.0",
     "@anthropic-ai/sdk": "^0.30.0",
-    "@google/generative-ai": "^0.20.0"
+    "@google/generative-ai": "^0.20.0",
+    "commander": "^12.0.0",
+    "lucide-react": "^1.55.0",
+    "openai": "^4.50.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "yaml": "^2.4.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tsx": "^4.10.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0",
-    "@types/node": "^20.12.0",
-    "tsx": "^4.10.0"
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
   }
 }

@@ -3,5 +3,12 @@ tests/
 demo/
 src/
 .git/
+.harness/
+.agents/
+.codex/
+coverage/
+frontend/
 .env
+.env.*
 *.key
+*.pem

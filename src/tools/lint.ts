@@ -1,35 +1,14 @@
-import { exec } from 'child_process';
-import type { ToolDefinition, ActionResult } from '../core/types';
+import type { ToolDefinition } from '../core/types';
+import { createCommandExecutor, type CommandExecutor } from './executor';
 
-function execCommand(command: string): Promise<ActionResult> {
-  return new Promise((resolve) => {
-    exec(command, { timeout: 120000 }, (error, stdout, stderr) => {
-      if (error) {
-        resolve({
-          success: false,
-          output: stdout,
-          error: stderr || error.message,
-          exitCode: error.code ?? 1,
-        });
-      } else {
-        resolve({
-          success: true,
-          output: stdout,
-          error: stderr,
-          exitCode: 0,
-        });
-      }
-    });
-  });
-}
-
-export function createLintTool(): ToolDefinition {
+export function createLintTool(executor?: CommandExecutor): ToolDefinition {
+  const commandExecutor = executor ?? createCommandExecutor({ mode: 'local', workspaceRoot: process.cwd() });
   return {
     name: 'run_lint',
-    description: '执行 lint 命令并返回结果',
+    description: '使用配置的执行器运行代码检查并返回退出状态',
     parameters: {
-      command: { type: 'string', description: '要执行的 lint 命令', required: true },
+      command: { type: 'string', description: '要执行的代码检查命令', required: true },
     },
-    execute: (params: Record<string, string>) => execCommand(params.command),
+    execute: (params, context) => commandExecutor.execute(params.command, context),
   };
 }

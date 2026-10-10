@@ -6,13 +6,13 @@ const { mockCreate, mockConstructor } = vi.hoisted(() => ({
 }));
 
 vi.mock('openai', () => ({
-  default: mockConstructor.mockImplementation(() => ({
+  default: mockConstructor.mockImplementation(function () { return {
     chat: {
       completions: {
         create: mockCreate,
       },
     },
-  })),
+  }; }),
 }));
 
 import { createOpenAIProvider } from '../../src/llm/openai';
@@ -178,10 +178,12 @@ describe('createOpenAIProvider', () => {
     expect(result.toolCalls).toBeDefined();
     expect(result.toolCalls!.length).toBe(2);
     expect(result.toolCalls![0]).toEqual({
+      id: 'call_1',
       name: 'read_file',
       arguments: { path: '/src/app.ts' },
     });
     expect(result.toolCalls![1]).toEqual({
+      id: 'call_2',
       name: 'shell_exec',
       arguments: { command: 'echo hello' },
     });
@@ -204,6 +206,19 @@ describe('createOpenAIProvider', () => {
 
     expect(result.content).toBe('No tools here');
     expect(result.toolCalls).toBeUndefined();
+  });
+
+  it('原生工具调用与结果回传，并传递取消与生成配置', async () => {
+    mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: 'ok' } }] });
+    const signal = new AbortController().signal;
+    await createOpenAIProvider({ apiKey: 'test', model: 'test' }).complete([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_a', name: 'read_file', arguments: { path: 'a.ts' } }] },
+      { role: 'tool', content: '{"success":true,"output":"file"}', toolCallId: 'call_a', name: 'read_file' },
+    ], [], { signal, maxTokens: 99, temperature: 0.2 });
+    expect(mockCreate).toHaveBeenCalledWith({ model: 'test', max_tokens: 99, temperature: 0.2, messages: [
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call_a', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }] },
+      { role: 'tool', content: '{"success":true,"output":"file"}', tool_call_id: 'call_a' },
+    ] }, { signal });
   });
 
   describe('completeStream', () => {
@@ -272,6 +287,7 @@ describe('createOpenAIProvider', () => {
         model: 'gpt-4o',
         messages: [{ role: 'user', content: 'Hi' }],
         stream: true,
+        stream_options: { include_usage: true },
       });
     });
 

@@ -8,9 +8,9 @@ const mockGetGenerativeModel = vi.fn().mockImplementation(() => ({
 }));
 
 vi.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: vi.fn().mockImplementation(() => ({
+  GoogleGenerativeAI: vi.fn().mockImplementation(function () { return {
     getGenerativeModel: mockGetGenerativeModel,
-  })),
+  }; }),
 }));
 
 import { createGeminiProvider } from '../../src/llm/gemini';
@@ -220,6 +220,23 @@ describe('createGeminiProvider', () => {
 
     expect(result.content).toBe('No function call here');
     expect(result.toolCalls).toBeUndefined();
+  });
+
+  it('注册函数声明并回传functionResponse及调用元数据，传递signal', async () => {
+    mockGenerateContent.mockResolvedValueOnce({ response: { text: () => 'ok' } });
+    const signal = new AbortController().signal;
+    const tool = { name: 'read_file', description: '读取', parameters: { path: { type: 'string', description: '路径', required: true } }, execute: async () => ({ success: true, output: '' }) };
+    await createGeminiProvider({ apiKey: 'test', model: 'test' }).complete([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 'read_file', arguments: { path: 'a' }, metadata: { thoughtSignature: 'signature' } }] },
+      { role: 'tool', content: '{"success":true,"output":"file"}', toolCallId: 'a', name: 'read_file' },
+    ], [tool], { signal, maxTokens: 70, temperature: 0 });
+    expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: 'test', generationConfig: { maxOutputTokens: 70, temperature: 0 }, tools: [{ functionDeclarations: [{
+      name: 'read_file', description: '读取', parameters: { type: 'object', properties: { path: { type: 'string', description: '路径' } }, required: ['path'] },
+    }] }] });
+    expect(mockGenerateContent).toHaveBeenCalledWith({ contents: [
+      { role: 'model', parts: [{ thoughtSignature: 'signature', functionCall: { name: 'read_file', args: { path: 'a' } } }] },
+      { role: 'function', parts: [{ functionResponse: { name: 'read_file', response: { success: true, output: 'file' } } }] },
+    ] }, { signal });
   });
 
   describe('completeStream', () => {

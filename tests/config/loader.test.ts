@@ -170,20 +170,22 @@ llm:
     });
   });
 
-  describe('YAML 解析失败时回退到默认配置', () => {
-    it('应返回默认配置并输出 console.warn 警告', () => {
-      const warningSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  describe('无效配置拒绝启动', () => {
+    it('格式错误不能静默改变执行策略', () => {
       const configPath = path.join(tmpDir, 'invalid.yaml');
       writeYaml(configPath, 'invalid: yaml: : syntax: error');
 
-      const config = loadConfig(configPath);
-
-      expect(config).toEqual(DefaultConfig);
-      expect(warningSpy).toHaveBeenCalled();
-      expect(warningSpy.mock.calls[0][0]).toContain('配置解析失败');
-      expect(warningSpy.mock.calls[0][0]).toContain('默认配置');
-
-      warningSpy.mockRestore();
+      expect(() => loadConfig(configPath)).toThrow('配置解析失败');
+    });
+    it.each(['agent:\n  maxTurns: -1', 'execution:\n  mode: unsafe', 'governance:\n  sandbox:\n    allowedCommands: []', 'memory:\n  maxContextTokens: 0'])('拒绝无效字段 %s', (content) => {
+      const file = path.join(tmpDir, 'invalid-field.yaml');
+      writeYaml(file, content);
+      expect(() => loadConfig(file)).toThrow();
+    });
+    it('默认配置返回独立副本', () => {
+      const first = loadConfig(path.join(tmpDir, 'missing.yaml'));
+      first.governance.sandbox.allowedCommands.push('unexpected');
+      expect(loadConfig(path.join(tmpDir, 'missing.yaml')).governance.sandbox.allowedCommands).not.toContain('unexpected');
     });
   });
 });

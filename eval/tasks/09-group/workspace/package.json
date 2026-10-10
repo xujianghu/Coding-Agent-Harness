@@ -1,0 +1,8 @@
+{
+  "name": "eval-09-group",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/public.test.cjs"
+  }
+}

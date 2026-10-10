@@ -1,13 +1,37 @@
 name: CI
 on: [push, pull_request]
+
 jobs:
-  unit-test:
-    runs-on: ubuntu-latest
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
+          cache: npm
       - run: npm ci
+      - run: npm run build
       - run: npm test
       - run: npm run demo
+      - run: npm run eval:smoke
+      - run: npm run test:package
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: docker pull node:22-alpine
+      - run: npm run test:docker
