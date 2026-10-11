@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { join, relative, resolve, sep } from 'path';
-import type { WebEvaluationReport, WebEvent, WebRun } from './types';
+import type { WebConversation, WebEvaluationReport, WebEvent, WebRun } from './types';
 
 export const VALID_ID = /^[a-zA-Z0-9_-]{1,100}$/;
 
@@ -29,6 +29,17 @@ export function saveRun(workspace: string, run: WebRun): void {
   const temporary = destination + '.' + randomUUID() + '.tmp';
   // 轨迹保存在 JSONL 中，元数据无需重复模型输入。
   writeFileSync(temporary, JSON.stringify({ ...run, events: [], pendingApproval: undefined }), { mode: 0o600 });
+  renameSync(temporary, destination);
+}
+
+export interface StoredConversation extends WebConversation { configHash: string }
+
+export function saveConversation(workspace: string, conversation: StoredConversation): void {
+  const directory = statePath(workspace, 'web-conversations');
+  mkdirSync(directory, { recursive: true });
+  const destination = statePath(workspace, 'web-conversations', conversation.id + '.json');
+  const temporary = destination + '.' + randomUUID() + '.tmp';
+  writeFileSync(temporary, JSON.stringify(conversation), { mode: 0o600 });
   renameSync(temporary, destination);
 }
 

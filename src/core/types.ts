@@ -76,6 +76,8 @@ export interface AgentCheckpoint {
   version: 1;
   task: string;
   messages: LLMMessage[];
+  /** 当前任务消息在裁剪后上下文中的位置，旧检查点可以缺省。 */
+  taskMessageIndex?: number;
   history: ConversationTurn[];
   turns: number;
   usage: TokenUsage;

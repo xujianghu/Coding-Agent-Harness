@@ -4,6 +4,7 @@ import {
   TokenUsage, ToolExecutionContext,
 } from './types';
 import { estimateContextTokens, estimateTokens, limitText, throwIfAborted, waitWithSignal } from './runtime';
+import { validateContextMessages } from './conversation-context';
 
 function buildSystemPrompt(tools: ToolDefinition[]): string {
   return `你是编码 Agent。使用提供的工具检查和修改仓库。工具返回失败时根据具体报错修复。
@@ -89,7 +90,31 @@ export async function executeAction(tools: ToolDefinition[], action: AgentAction
 }
 
 /** 以完整 assistant/tool 组裁剪，避免留下没有调用来源的工具结果。 */
-export function trimConversationHistory(messages: LLMMessage[], maxTurns: number, maxContextTokens?: number): LLMMessage[] {
+export function trimConversationHistory(messages: LLMMessage[], maxTurns: number, maxContextTokens?: number, pinnedMessage?: LLMMessage): LLMMessage[] {
+  if (pinnedMessage) {
+    if (!messages.includes(pinnedMessage)) throw new Error('当前任务消息已丢失');
+    const base = messages[0]?.role === 'system' ? [messages[0]] : [];
+    const groups: LLMMessage[][] = [];
+    for (const message of messages.slice(base.length)) {
+      if (message === pinnedMessage || message.role === 'assistant' || groups.length === 0) groups.push([message]);
+      else groups[groups.length - 1].push(message);
+    }
+    const pinnedGroup = groups.find(group => group.includes(pinnedMessage))!;
+    while (groups.length - 1 > Math.max(0, maxTurns)) {
+      groups.splice(groups.findIndex(group => group !== pinnedGroup), 1);
+    }
+    let trimmed = [...base, ...groups.flat()];
+    while (maxContextTokens !== undefined && estimateContextTokens(trimmed) > maxContextTokens) {
+      // 删除旧会话后仍保留本轮最新反馈，避免忘记验收失败而误报完成。
+      const lastGroup = groups.at(-1);
+      const latestCurrentGroup = lastGroup && groups.indexOf(lastGroup) > groups.indexOf(pinnedGroup) ? lastGroup : undefined;
+      const index = groups.findIndex(group => group !== pinnedGroup && group !== latestCurrentGroup);
+      if (index < 0) break;
+      groups.splice(index, 1);
+      trimmed = [...base, ...groups.flat()];
+    }
+    return trimmed;
+  }
   const base = messages.slice(0, 2);
   const groups: LLMMessage[][] = [];
   for (const message of messages.slice(2)) {
@@ -134,6 +159,8 @@ export interface AgentCallbacks {
 
 export interface AgentRunOptions {
   checkpoint?: AgentCheckpoint;
+  /** 新一轮任务的已完成上下文，与恢复原任务的检查点互斥。 */
+  contextMessages?: LLMMessage[];
   signal?: AbortSignal;
 }
 
@@ -145,10 +172,21 @@ export function createAgentLoop(config: AgentConfig, llm: LLMProvider, tools: To
     exportCheckpoint(): AgentCheckpoint | undefined { return latest ? clone(latest) : undefined; },
     async run(task: string, options: AgentRunOptions = {}): Promise<AgentRunResult> {
       if (active) throw new Error('同一个 Agent 循环不能并发运行');
+      if (options.checkpoint && options.contextMessages !== undefined) throw new Error('检查点恢复与新会话上下文不能同时使用');
       if (options.checkpoint && (options.checkpoint.version !== 1 || options.checkpoint.task !== task)) throw new Error('检查点版本或任务不匹配');
       if (options.checkpoint?.executionUncertain) throw new Error('检查点中有结果未知的动作，请核对工作区后恢复，禁止自动重放');
-      active = true;
       const checkpoint = options.checkpoint ? clone(options.checkpoint) : undefined;
+      const context = options.contextMessages === undefined ? undefined : validateContextMessages(options.contextMessages);
+      const taskMessage: LLMMessage = { role: 'user', content: task };
+      let currentTaskMessage: LLMMessage | undefined = context !== undefined ? taskMessage : undefined;
+      if (checkpoint?.taskMessageIndex !== undefined) {
+        const index = checkpoint.taskMessageIndex;
+        if (!Number.isInteger(index) || index < 0 || checkpoint.messages[index]?.role !== 'user' || checkpoint.messages[index]?.content !== task) {
+          throw new Error('检查点当前任务消息位置无效');
+        }
+        currentTaskMessage = checkpoint.messages[index];
+      }
+      active = true;
       const controller = new AbortController();
       const forwardAbort = () => controller.abort(options.signal?.reason ?? new Error('操作已取消'));
       options.signal?.addEventListener('abort', forwardAbort, { once: true });
@@ -164,7 +202,7 @@ export function createAgentLoop(config: AgentConfig, llm: LLMProvider, tools: To
         throwIfAborted(signal);
       };
       const history = checkpoint?.history ?? [{ role: 'user' as const, content: task, timestamp: Date.now() }];
-      let messages: LLMMessage[] = checkpoint?.messages ?? [{ role: 'system', content: buildSystemPrompt(tools) }, { role: 'user', content: task }];
+      let messages: LLMMessage[] = checkpoint?.messages ?? [{ role: 'system', content: buildSystemPrompt(tools) }, ...(context ?? []), taskMessage];
       let turns = checkpoint?.turns ?? 0;
       let usage: TokenUsage = checkpoint?.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
       let usageEstimated = checkpoint?.usageEstimated ?? false;
@@ -177,12 +215,13 @@ export function createAgentLoop(config: AgentConfig, llm: LLMProvider, tools: To
       let executionUncertain: AgentAction | undefined;
       const save = async () => {
         latest = clone({ version: 1, task, messages, history, turns, usage, usageEstimated, parseAttempts, state, summary, verified,
+          ...(currentTaskMessage ? { taskMessageIndex: messages.indexOf(currentTaskMessage) } : {}),
           remainingTokens: config.agent.maxTotalTokens === undefined ? undefined : Math.max(0, config.agent.maxTotalTokens - usage.totalTokens),
           elapsedMs: previousElapsed + Date.now() - started, ...(pendingToolCalls.length ? { pendingToolCalls } : {}), ...(executionUncertain ? { executionUncertain } : {}),
         } satisfies AgentCheckpoint);
         await callbacks.onCheckpoint?.(clone(latest));
       };
-      const trim = () => { messages = trimConversationHistory(messages, config.memory.maxConversationTurns, config.memory.maxContextTokens); };
+      const trim = () => { messages = trimConversationHistory(messages, config.memory.maxConversationTurns, config.memory.maxContextTokens, currentTaskMessage); };
       const runAction = async (action: AgentAction, responseContent: string, native: boolean) => {
         assertActive();
         if (config.agent.maxTotalTokens !== undefined && usage.totalTokens >= config.agent.maxTotalTokens) throw new Error('token budget exhausted');

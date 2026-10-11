@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'fs';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { createRunManager, WebApiError } from './manager';
+import { listWorkspaceFiles, readWorkspaceFile } from './files';
 
 export interface WebServerOptions { workspace: string; port?: number; host?: string; configPath?: string; staticDir?: string }
 
@@ -66,20 +67,74 @@ export async function startWebServer(options: WebServerOptions): Promise<{ url: 
   const requestedPort = options.port ?? 4173;
   if (!Number.isSafeInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) throw new WebApiError('端口必须是 0 到 65535 的整数');
   const manager = createRunManager(options);
+  const streams = new Set<ServerResponse>();
   const staticDir = options.staticDir ?? resolve(__dirname, '../web-ui');
   let port = requestedPort;
+  function streamRun(request: IncomingMessage, response: ServerResponse, id: string): void {
+    manager.getRun(id);
+    if (streams.size >= 64) throw new WebApiError('实时连接数量超过上限，请关闭其他页面', 429, 'TOO_MANY_STREAMS');
+    response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    response.flushHeaders();
+    streams.add(response);
+    let backpressured = false;
+    let pending: string | undefined;
+    let disposed = false;
+    const emit = (frame: string) => {
+      if (disposed || response.destroyed) return;
+      // 慢客户端只保留最新完整快照，不累积无限事件队列。
+      if (backpressured) { pending = frame; return; }
+      backpressured = !response.write(frame);
+    };
+    const unsubscribe = manager.subscribe(id, run => emit(`event: run\ndata: ${JSON.stringify(run)}\n\n`));
+    const heartbeat = setInterval(() => { if (!backpressured && !disposed) backpressured = !response.write(': heartbeat\n\n'); }, 15000);
+    heartbeat.unref();
+    const cleanup = () => {
+      if (disposed) return;
+      disposed = true; pending = undefined;
+      clearInterval(heartbeat); unsubscribe(); streams.delete(response);
+      response.removeListener('drain', drain);
+      response.removeListener('close', cleanup);
+      response.removeListener('error', cleanup);
+      request.removeListener('aborted', cleanup);
+    };
+    const drain = () => {
+      backpressured = false;
+      if (pending) { const frame = pending; pending = undefined; emit(frame); }
+    };
+    response.on('drain', drain);
+    response.once('close', cleanup);
+    response.once('error', cleanup);
+    request.once('aborted', cleanup);
+  }
   const server = createServer((request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
     const handle = async () => {
       validateHost(request, port);
-      const path = new URL(request.url ?? '/', `http://127.0.0.1:${port}`).pathname;
+      const url = new URL(request.url ?? '/', `http://127.0.0.1:${port}`);
+      const path = url.pathname;
       const method = request.method;
       if (path.startsWith('/api/')) {
         if (method === 'GET' && path === '/api/workspace') return reply(response, 200, manager.getWorkspace());
         if (method === 'GET' && path === '/api/runs') return reply(response, 200, { runs: manager.list() });
         if (method === 'GET' && path === '/api/evaluations') return reply(response, 200, { reports: manager.evaluations() });
+        if (method === 'GET' && path === '/api/conversations') return reply(response, 200, { conversations: manager.listConversations() });
+        if (method === 'POST' && path === '/api/conversations') return reply(response, 201, manager.createConversation(await jsonBody(request)));
+        const conversationRoute = path.match(/^\/api\/conversations\/([a-zA-Z0-9_-]{1,100})(?:\/(messages))?$/);
+        if (conversationRoute) {
+          const [, id, operation] = conversationRoute;
+          if (method === 'GET' && !operation) return reply(response, 200, manager.getConversation(id));
+          if (method === 'POST' && operation === 'messages') return reply(response, 201, manager.sendMessage(id, await jsonBody(request)));
+        }
+        if (method === 'GET' && (path === '/api/files' || path === '/api/file')) {
+          if ([...url.searchParams.keys()].some(key => !['conversationId', 'path'].includes(key))) throw new WebApiError('包含未知文件参数');
+          const fileWorkspace = manager.fileWorkspace(url.searchParams.get('conversationId') ?? undefined);
+          const filePath = url.searchParams.get('path') ?? '';
+          return reply(response, 200, path === '/api/files' ? listWorkspaceFiles(fileWorkspace, filePath) : readWorkspaceFile(fileWorkspace, filePath));
+        }
+        const eventsRoute = path.match(/^\/api\/runs\/([a-zA-Z0-9_-]{1,100})\/events$/);
+        if (method === 'GET' && eventsRoute) return streamRun(request, response, eventsRoute[1]);
         if (method === 'POST' && path === '/api/runs') return reply(response, 201, manager.start(await jsonBody(request)));
         const route = path.match(/^\/api\/runs\/([a-zA-Z0-9_-]{1,100})(?:\/(cancel|approve|resume))?$/);
         if (route) {
@@ -116,6 +171,7 @@ export async function startWebServer(options: WebServerOptions): Promise<{ url: 
   return { url: `http://127.0.0.1:${port}`, close() {
     return closing ??= (async () => {
       await manager.close();
+      for (const stream of streams) stream.end();
       await new Promise<void>((resolveClosed, reject) => { server.close(error => error ? reject(error) : resolveClosed()); server.closeAllConnections(); });
     })();
   } };

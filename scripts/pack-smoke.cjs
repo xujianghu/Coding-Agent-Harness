@@ -37,6 +37,27 @@ try {
         if (!page.ok || !(await page.text()).includes('id="root"')) throw new Error('安装包前端不可用');
         const api = await fetch(new URL('/api/workspace',app.url));
         if (!api.ok || !(await api.json()).workspace) throw new Error('安装包工作台API不可用');
+        const request = async (route, body) => {
+          const response = await fetch(new URL(route, app.url), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+          if (!response.ok) throw new Error('安装包会话API不可用：'+route);
+          return response.json();
+        };
+        const conversation = await request('/api/conversations', {mock:true,title:'安装包会话检查'});
+        const detail = await fetch(new URL('/api/conversations/'+conversation.id, app.url));
+        if (!(await detail.json()).canSend) throw new Error('新建会话不能发送消息');
+        const listing = await fetch(new URL('/api/files?conversationId='+conversation.id, app.url));
+        if (!listing.ok || !Array.isArray((await listing.json()).entries)) throw new Error('安装包文件浏览不可用');
+        const {run} = await request('/api/conversations/'+conversation.id+'/messages', {content:'离线机制检查'});
+        if (run.conversationId !== conversation.id) throw new Error('任务未关联会话');
+        const controller = new AbortController();
+        const stream = await fetch(new URL('/api/runs/'+run.id+'/events',app.url),{signal:controller.signal});
+        if (!stream.ok || !stream.headers.get('content-type')?.includes('text/event-stream')) throw new Error('安装包执行事件流不可用');
+        const reader = stream.body.getReader();
+        const snapshot = await reader.read();
+        if (!new TextDecoder().decode(snapshot.value).includes('event: run')) throw new Error('事件流未发送当前快照');
+        controller.abort();
+        await reader.cancel().catch(() => {});
+        await request('/api/runs/'+run.id+'/cancel', {});
       } finally { await app.close(); }
     })().catch(error => { console.error(error);process.exitCode=1; });
   `;

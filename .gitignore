@@ -9,6 +9,7 @@ credentials.*
 .harness/sessions/
 .harness/runs/
 .harness/web-runs/
+.harness/web-conversations/
 .harness/web-demo/
 .harness/eval-results/
 eval-results/

@@ -17,6 +17,7 @@ export interface PendingApproval {
 
 export interface Run {
   id: string;
+  conversationId?: string;
   task: string;
   status: RunStatus;
   verified: boolean;
@@ -60,12 +61,34 @@ export interface Evaluation {
   report?: string;
 }
 
-export interface NewRunInput {
-  task: string;
-  verify?: string;
-  mock: boolean;
-  execution: 'docker' | 'local';
+export interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+  runId: string;
 }
+
+export interface Conversation {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  workspace: string;
+  mock: boolean;
+  execution: 'local' | 'docker';
+  verifier?: string;
+  runIds: string[];
+  messages: ConversationMessage[];
+  canSend: boolean;
+  blockedReason?: string;
+}
+
+export interface ConversationDetail extends Conversation { runs: Run[] }
+export interface NewConversationInput { title?: string; mock: boolean; execution: 'local' | 'docker'; verify?: string }
+export interface FileEntry { name: string; path: string; kind: 'file' | 'directory'; size?: number }
+export interface FileListing { path: string; entries: FileEntry[]; truncated: boolean }
+export interface FileContent { path: string; content: string; size: number; sha256: string }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
