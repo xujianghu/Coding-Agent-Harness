@@ -1,7 +1,10 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
 *.key
+*.pem
 credentials.*
 .harness/memory/
 .harness/*.log

@@ -1,0 +1,25 @@
+name: 功能建议
+description: 说明使用场景、当前问题与可验证的完成条件
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景与问题
+      description: 描述具体任务、当前做法和遇到的限制。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 说明期望行为和已有替代方案。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完成条件
+      description: 如何验证功能有效，是否需要对照评测？
+    validations:
+      required: true

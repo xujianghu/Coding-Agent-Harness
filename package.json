@@ -2,6 +2,24 @@
   "name": "coding-agent-harness",
   "version": "1.1.0",
   "description": "A verifiable and recoverable coding agent harness with isolated execution and reproducible evaluation",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xujianghu/Coding-Agent-Harness.git"
+  },
+  "homepage": "https://github.com/xujianghu/Coding-Agent-Harness#readme",
+  "bugs": {
+    "url": "https://github.com/xujianghu/Coding-Agent-Harness/issues"
+  },
+  "keywords": [
+    "coding-agent",
+    "agent-harness",
+    "tool-calling",
+    "human-in-the-loop",
+    "docker-sandbox",
+    "agent-evaluation",
+    "typescript",
+    "react"
+  ],
   "main": "dist/cli/index.js",
   "bin": {
     "harness": "./dist/cli/index.js",
@@ -15,6 +33,7 @@
     "eval",
     "docs",
     "README.md",
+    "CONTRIBUTING.md",
     "Dockerfile.sandbox"
   ],
   "scripts": {
