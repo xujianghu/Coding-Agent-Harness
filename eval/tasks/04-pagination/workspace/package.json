@@ -1,0 +1,8 @@
+{
+  "name": "eval-04-pagination",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/public.test.cjs"
+  }
+}

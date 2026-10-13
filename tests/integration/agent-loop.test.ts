@@ -54,7 +54,7 @@ describe('Agent 集成测试：主循环 → 管道 → 工具执行 → 反馈�
 
     const guardrail = createGuardrailEngine([]);
     const hitl = createHITL();
-    const sandbox = createSandbox([workspaceDir, process.cwd()], []);
+    const sandbox = createSandbox(['.'], [], workspaceDir);
     const pipeline = createGovernancePipeline(guardrail, hitl, sandbox);
 
     const loop = createAgentLoop(config, mockLLM, tools, {

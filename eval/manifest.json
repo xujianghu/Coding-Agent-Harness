@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "description": "冻结的轻量 Node 仓库修复任务；mock 仅验证机制，不衡量模型能力。",
+  "tasks": [
+    {
+      "id": "01-clamp",
+      "title": "修复边界裁剪",
+      "tags": [
+        "单文件",
+        "边界"
+      ],
+      "prompt": "修复 src/clamp.cjs 的 clamp(value, min, max)：小于下界返回 min，大于上界返回 max，区间内保持原值。保留原有导出和非法区间的 RangeError。运行 npm test。",
+      "fixture": "tasks/01-clamp/workspace",
+      "acceptance": "tasks/01-clamp/acceptance",
+      "mockSolution": "tasks/01-clamp/mock-solution",
+      "allowedChanges": [
+        "src/clamp.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "02-discount",
+      "title": "修复折扣计算",
+      "tags": [
+        "单文件",
+        "回归"
+      ],
+      "prompt": "修复 src/discount.cjs 的 discounted(price, percent)。percent 表示优惠百分比（20 表示八折），金额四舍五入保留两位小数。保留 0 到 100 的校验与 RangeError。运行 npm test。",
+      "fixture": "tasks/02-discount/workspace",
+      "acceptance": "tasks/02-discount/acceptance",
+      "mockSolution": "tasks/02-discount/mock-solution",
+      "allowedChanges": [
+        "src/discount.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "03-unique",
+      "title": "保留类型的稳定去重",
+      "tags": [
+        "单文件",
+        "回归"
+      ],
+      "prompt": "修复 src/unique.cjs 的 unique(values)。按 JavaScript Set 的相等语义稳定去重：数字 1 与字符串 \"1\" 不同，NaN 只保留一个，同一对象引用去重但不同对象均保留，且不修改输入。运行 npm test。",
+      "fixture": "tasks/03-unique/workspace",
+      "acceptance": "tasks/03-unique/acceptance",
+      "mockSolution": "tasks/03-unique/mock-solution",
+      "allowedChanges": [
+        "src/unique.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "04-pagination",
+      "title": "修复从第一页开始的分页",
+      "tags": [
+        "单文件",
+        "边界"
+      ],
+      "prompt": "修复 src/pagination.cjs 的 paginate(items, page, size)：page 从 1 开始，返回对应页，超出范围返回空数组。保留正整数校验、不修改输入。运行 npm test。",
+      "fixture": "tasks/04-pagination/workspace",
+      "acceptance": "tasks/04-pagination/acceptance",
+      "mockSolution": "tasks/04-pagination/mock-solution",
+      "allowedChanges": [
+        "src/pagination.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "05-cart",
+      "title": "修复购物车数量与金额换算",
+      "tags": [
+        "多文件",
+        "回归"
+      ],
+      "prompt": "修复 src/cart.cjs 和 src/money.cjs：toCents(amount) 四舍五入换算为分；cartTotal(lines) 对每行先转分再乘 quantity，求和后返回元，空购物车为 0，不修改输入。运行 npm test。",
+      "fixture": "tasks/05-cart/workspace",
+      "acceptance": "tasks/05-cart/acceptance",
+      "mockSolution": "tasks/05-cart/mock-solution",
+      "allowedChanges": [
+        "src/money.cjs",
+        "src/cart.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "06-duration",
+      "title": "定位持续时间格式错误",
+      "tags": [
+        "定位",
+        "多文件调用"
+      ],
+      "prompt": "入口 src/index.cjs 的 formatDuration(minutes) 应把非负整数分钟格式化为 H:MM（如 125 -> 2:05），小时允许超过 24，非法输入抛出 RangeError。定位实际实现并只修改 src/lib/duration.cjs，保持入口接口。运行 npm test。",
+      "fixture": "tasks/06-duration/workspace",
+      "acceptance": "tasks/06-duration/acceptance",
+      "mockSolution": "tasks/06-duration/mock-solution",
+      "allowedChanges": [
+        "src/lib/duration.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "07-path",
+      "title": "定位路径分隔符归一化",
+      "tags": [
+        "定位",
+        "回归"
+      ],
+      "prompt": "修复 src/utils/path.cjs 的 normalizePath(value)：把所有反斜杠转换为 /，连续斜杠合并为一个，保留大小写和开头、结尾的单个斜杠，空字符串保持空字符串。入口 src/index.cjs 不得修改。运行 npm test。",
+      "fixture": "tasks/07-path/workspace",
+      "acceptance": "tasks/07-path/acceptance",
+      "mockSolution": "tasks/07-path/mock-solution",
+      "allowedChanges": [
+        "src/utils/path.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "08-csv",
+      "title": "修复 CSV 字段转义",
+      "tags": [
+        "定位",
+        "回归"
+      ],
+      "prompt": "修复 src/escape.cjs 的 escapeCell：值先转字符串，含逗号、双引号、CR 或 LF 时用双引号包裹，内部每个双引号变成两个。src/csv.cjs 使用此函数拼接行，请保持不变。运行 npm test。",
+      "fixture": "tasks/08-csv/workspace",
+      "acceptance": "tasks/08-csv/acceptance",
+      "mockSolution": "tasks/08-csv/mock-solution",
+      "allowedChanges": [
+        "src/escape.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "09-group",
+      "title": "修复特殊键的分组",
+      "tags": [
+        "单文件",
+        "回归"
+      ],
+      "prompt": "修复 src/group.cjs 的 groupBy(items,key)：返回无原型对象，按每个 item[key] 的字符串值分组并保留原始顺序，支持 __proto__、constructor、toString 等键，不修改输入。运行 npm test。",
+      "fixture": "tasks/09-group/workspace",
+      "acceptance": "tasks/09-group/acceptance",
+      "mockSolution": "tasks/09-group/mock-solution",
+      "allowedChanges": [
+        "src/group.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    },
+    {
+      "id": "10-retry",
+      "title": "修复异步重试与最后一次异常",
+      "tags": [
+        "异步",
+        "边界"
+      ],
+      "prompt": "修复 src/retry.cjs 的异步 retry(fn,maxAttempts)。失败后继续调用，首次成功即返回结果；maxAttempts 为正整数，耗尽后抛出最后一次异常；fn 接收从 1 开始的尝试编号。无需等待或新增依赖。运行 npm test。",
+      "fixture": "tasks/10-retry/workspace",
+      "acceptance": "tasks/10-retry/acceptance",
+      "mockSolution": "tasks/10-retry/mock-solution",
+      "allowedChanges": [
+        "src/retry.cjs"
+      ],
+      "publicTestCommand": "node --test test/public.test.cjs"
+    }
+  ]
+}

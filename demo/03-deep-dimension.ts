@@ -92,26 +92,25 @@ const res5 = pipeline.process(act5);
 logAudit(act5, res5);
 assert(res5.requiresApproval === true, 'sudo 命令触发审批');
 assert(res5.pipelineStages.includes('guardrail'), '经过了 guardrail');
-assert(res5.pipelineStages.length === 1, 'guardrail 阶段拦截，不进入 sandbox/hitl');
+assert(res5.pipelineStages.includes('sandbox') && res5.pipelineStages.includes('hitl'), '先校验命令边界，再进入审批');
 
-// Manually trigger HITL (pipeline doesn't auto-request for guardrail approval - let's fix that)
-// Check if guardrail result requires approval
+// 管道已经提出审批请求；演示只模拟用户决定，不执行 sudo 命令。
 const guardrailResult = guardrail.evaluate(act5);
 assert(guardrailResult.requiresApproval === true, 'guardrail 标记需要审批');
 
-// Simulate HITL approval flow
-hitl.requestApproval(act5);
 assert(hitl.getState() === 'pending', 'HITL 状态为 pending');
 assert(hitl.getPendingAction()?.params.command === 'sudo systemctl restart nginx', '待审批动作正确');
 
 hitl.approve();
 assert(hitl.getState() === 'approved', 'HITL 审批通过');
 
-// Log approval result
+// 批准后重新检查策略，审计记录实际的重检结果。
+const approvedResult = pipeline.process(act5, true);
+assert(approvedResult.allowed, '审批通过后重新校验命令边界');
 audit.log({
   timestamp: Date.now(),
   action: { type: act5.type, params: act5.params },
-  result: { allowed: true, reason: 'Approved by HITL' },
+  result: approvedResult,
   approvalResult: 'approved',
 });
 

@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockCreate = vi.fn();
 vi.mock('@anthropic-ai/sdk', () => ({
-  default: vi.fn().mockImplementation(() => ({
+  default: vi.fn().mockImplementation(function () { return {
     messages: {
       create: mockCreate,
     },
-  })),
+  }; }),
 }));
 
 import { createAnthropicProvider } from '../../src/llm/anthropic';
@@ -134,10 +134,12 @@ describe('createAnthropicProvider', () => {
     expect(result.toolCalls).toBeDefined();
     expect(result.toolCalls!.length).toBe(2);
     expect(result.toolCalls![0]).toEqual({
+      id: 'toolu_1',
       name: 'read_file',
       arguments: { path: '/src/app.ts' },
     });
     expect(result.toolCalls![1]).toEqual({
+      id: 'toolu_2',
       name: 'shell_exec',
       arguments: { command: 'echo hello' },
     });
@@ -160,6 +162,19 @@ describe('createAnthropicProvider', () => {
 
     expect(result.content).toBe('No tools here');
     expect(result.toolCalls).toBeUndefined();
+  });
+
+  it('全部工具结果合并为user tool_result块，携带原始ID与signal', async () => {
+    mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: 'ok' }] });
+    const signal = new AbortController().signal;
+    await createAnthropicProvider({ apiKey: 'test', model: 'test' }).complete([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 'read_file', arguments: { path: 'a' } }, { id: 'b', name: 'read_file', arguments: { path: 'b' } }] },
+      { role: 'tool', content: 'file a', toolCallId: 'a' }, { role: 'tool', content: 'file b', toolCallId: 'b' },
+    ], [], { signal, maxTokens: 50, temperature: 0 });
+    expect(mockCreate).toHaveBeenCalledWith({ model: 'test', max_tokens: 50, temperature: 0, messages: [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: 'read_file', input: { path: 'a' } }, { type: 'tool_use', id: 'b', name: 'read_file', input: { path: 'b' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: 'file a' }, { type: 'tool_result', tool_use_id: 'b', content: 'file b' }] },
+    ] }, { signal });
   });
 
   describe('completeStream', () => {

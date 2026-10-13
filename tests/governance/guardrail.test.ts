@@ -93,4 +93,25 @@ describe('GuardrailEngine', () => {
     const result = engine.evaluate(action);
     expect(result.allowed).toBe(true);
   });
+
+  it.each(['run_test', 'run_lint'] as const)('%s 不能通过改换工具名绕过护栏', (type) => {
+    const engine = createGuardrailEngine(rules);
+    expect(engine.evaluate({ type, params: { command: 'git push --force' } }).allowed).toBe(false);
+    expect(engine.evaluate({ type, params: { command: 'sudo npm test' } }).requiresApproval).toBe(true);
+  });
+
+  it('审批规则先匹配时仍继续检查后续硬拦截', () => {
+    const engine = createGuardrailEngine([
+      { name: 'approve-all', pattern: 'git', action: 'approve', severity: 'low' },
+      { name: 'block-force', pattern: '--force', action: 'block', severity: 'critical' },
+    ]);
+    const result = engine.evaluate({ type: 'run_test', params: { command: 'git push --force' } });
+    expect(result.allowed).toBe(false);
+    expect(result.requiresApproval).not.toBe(true);
+  });
+
+  it('非法规则表达式按拒绝执行处理', () => {
+    const engine = createGuardrailEngine([{ name: 'bad', pattern: '[', action: 'block', severity: 'high' }]);
+    expect(engine.evaluate({ type: 'shell_exec', params: { command: 'npm test' } }).allowed).toBe(false);
+  });
 });

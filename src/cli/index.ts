@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { loadConfig } from '../config/loader';
+import { loadConfig, validateConfig } from '../config/loader';
+import { initializeWorkspace } from '../config/initialize';
 import { createToolRegistry } from '../tools/registry';
-import { createReadFileTool, createWriteFileTool, createDeleteFileTool } from '../tools/file';
-import { createShellTool } from '../tools/shell';
-import { createTestRunnerTool } from '../tools/test-runner';
-import { createLintTool } from '../tools/lint';
 import { createGuardrailEngine } from '../governance/guardrail';
 import { createGuardrailWatcher } from '../governance/watcher';
 import { createHITL } from '../governance/hitl';
@@ -19,109 +16,65 @@ import { createLLMProvider } from '../llm/factory';
 import { createAgentLoop } from '../core/loop';
 import { createChatLoop } from '../core/chat';
 import { createCredentialManager } from '../credential/manager';
-import { AgentAction, ConversationTurn, AgentConfig, LLMResponse } from '../core/types';
-import { parse } from 'yaml';
+import { AgentConfig, LLMResponse } from '../core/types';
 import * as readline from 'readline';
 import * as readlinePromises from 'readline/promises';
-import { parseSessionState } from './session';
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { existsSync } from 'fs';
+import { join, resolve, isAbsolute } from 'path';
+import { randomUUID } from 'crypto';
+import { createWorkspaceTools } from '../tools/workspace';
+import { createCommandExecutor } from '../tools/executor';
+import { saveSession, loadSession, assertSessionUnchanged, sessionConfigHash, StoredSession } from './checkpoint';
+import { createRunTrace, traceProvider } from './trace';
+import { loadGuardrailRules } from '../governance/load-rules';
+import { startWebServer } from '../web/server';
 
 function hiddenPrompt(query: string): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const stdin = process.stdin;
     const stdout = process.stdout;
+    if (!stdin.isTTY || typeof stdin.setRawMode !== 'function') {
+      reject(new Error('密钥输入需要交互式终端，请使用提供商环境变量'));
+      return;
+    }
+    const wasRaw = stdin.isRaw;
+    const cleanup = () => {
+      stdin.removeListener('data', onData);
+      stdin.removeListener('end', onEnd);
+      stdin.setRawMode(wasRaw);
+      stdin.pause();
+    };
+    const onEnd = () => { cleanup(); reject(new Error('密钥输入已结束')); };
+    const onData = (chunk: Buffer) => {
+      for (const char of chunk.toString()) {
+        if (char === '\x03') { cleanup(); reject(new Error('用户取消密钥输入')); return; }
+        if (char === '\r' || char === '\n') {
+          stdout.write('\n'); cleanup(); resolve(input); return;
+        }
+        if (char === '\x7f' || char === '\b') {
+          if (input.length) { input = input.slice(0, -1); stdout.write('\b \b'); }
+        } else { input += char; stdout.write('*'); }
+      }
+    };
+    let input = '';
     stdout.write(query);
     stdin.setRawMode(true);
     stdin.resume();
-    let input = '';
-    stdin.on('data', (chunk: Buffer) => {
-      const char = chunk.toString();
-      if (char === '\r' || char === '\n') {
-        stdout.write('\n');
-        stdin.setRawMode(false);
-        stdin.pause();
-        resolve(input);
-      } else if (char === '\x7f') {
-        input = input.slice(0, -1);
-        stdout.write('\b \b');
-      } else {
-        input += char;
-        stdout.write('*');
-      }
-    });
+    stdin.on('data', onData);
+    stdin.once('end', onEnd);
   });
 }
-
-const DEFAULT_CONFIG_YAML = `llm:
-  provider: openai
-  model: gpt-4o
-  maxTokens: 4096
-  temperature: 0.1
-
-agent:
-  maxTurns: 50
-  timeout: 300000
-
-governance:
-  rulesFile: .harness/guardrails.yaml
-  sandbox:
-    allowedPaths:
-      - ./workspace
-      - ./src
-      - ./tests
-    allowedCommands:
-      - npm
-      - node
-      - npx
-      - tsc
-      - eslint
-      - vitest
-      - jest
-      - git
-
-memory:
-  storagePath: .harness/memory/
-  maxConversationTurns: 20
-`;
-
-const DEFAULT_GUARDRAILS_YAML = `rules:
-  - name: no-destructive-commands
-    pattern: "rm -rf|rm -r|del /f|format"
-    severity: critical
-    action: block
-    type: command
-  - name: no-env-file-access
-    pattern: "\\\\.env"
-    severity: high
-    action: block
-    type: file
-  - name: no-system-directory-write
-    pattern: "^/(etc|sys|proc|dev)/"
-    severity: high
-    action: block
-    type: file
-  - name: no-package-lock-write
-    pattern: "package-lock\\\\.json"
-    severity: medium
-    action: approve
-    type: file
-  - name: no-git-config-write
-    pattern: "\\\\.git/config"
-    severity: critical
-    action: block
-    type: file
-`;
 
 const program = new Command();
 
 program
   .name('harness')
   .description('Coding Agent Harness - CLI coding agent for autonomous development')
-  .version('1.0.0');
+  .version('1.1.0');
 
 interface HarnessSetup {
   config: AgentConfig;
+  rules: GuardrailRule[];
   registry: ReturnType<typeof createToolRegistry>;
   pipeline: ReturnType<typeof createGovernancePipeline>;
   hitl: ReturnType<typeof createHITL>;
@@ -132,39 +85,31 @@ interface HarnessSetup {
 
 async function setupHarness(configPath: string, workspace: string): Promise<HarnessSetup> {
   console.log('Loading config...');
-  const config = loadConfig(configPath);
+  workspace = resolve(workspace);
+  const config = loadConfig(isAbsolute(configPath) ? configPath : resolve(workspace, configPath));
+  validateConfig(config);
   console.log(`LLM Provider: ${config.llm.provider}, Model: ${config.llm.model}`);
 
   console.log('Registering tools...');
   const registry = createToolRegistry();
-  registry.register(createReadFileTool(workspace));
-  registry.register(createWriteFileTool(workspace));
-  registry.register(createDeleteFileTool(workspace));
-  registry.register(createShellTool());
-  registry.register(createTestRunnerTool());
-  registry.register(createLintTool());
+  for (const tool of createWorkspaceTools(config, workspace)) registry.register(tool);
   console.log(`Registered ${registry.list().length} tools`);
 
   console.log('Loading guardrail rules...');
-  let rules: GuardrailRule[] = [];
   const rulesPath = join(workspace, config.governance.rulesFile);
-  if (existsSync(rulesPath)) {
-    const rulesContent = readFileSync(rulesPath, 'utf-8');
-    const parsed = parse(rulesContent);
-    if (parsed && typeof parsed === 'object' && 'rules' in parsed) {
-      rules = (parsed as { rules: GuardrailRule[] }).rules;
-    }
-  }
+  if (!existsSync(rulesPath)) throw new Error('缺少护栏文件，请先运行 harness init');
+  const rules = loadGuardrailRules(rulesPath);
   console.log(`Loaded ${rules.length} guardrail rules`);
 
   const guardrail = createGuardrailEngine(rules);
   const watcher = createGuardrailWatcher(rulesPath, guardrail);
-  watcher.start();
+
 
   const hitl = createHITL();
   const sandbox = createSandbox(
     config.governance.sandbox.allowedPaths,
     config.governance.sandbox.allowedCommands,
+    workspace,
   );
   const pipeline = createGovernancePipeline(guardrail, hitl, sandbox);
 
@@ -177,7 +122,7 @@ async function setupHarness(configPath: string, workspace: string): Promise<Harn
   const credStatus = await credManager.status();
   console.log(`Credentials: ${credStatus[config.llm.provider] ? 'configured' : 'not configured'}`);
 
-  return { config, registry, pipeline, hitl, audit, watcher, credManager };
+  return { config, rules, registry, pipeline, hitl, audit, watcher, credManager };
 }
 
 async function resolveLLM(
@@ -198,115 +143,108 @@ async function resolveLLM(
     console.error(`\n无法连接 ${provider}：${(error as Error).message}`);
     console.error(`请先配置 API Key：harness key set ${provider}`);
     console.error('或设置环境变量 OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY。');
-    process.exit(1);
+    throw error;
   }
 }
 
-program
-  .command('run <task>')
-  .description('Execute a coding task')
-  .option('-c, --config <path>', 'Config file path', '.harness/config.yaml')
-  .option('-w, --workspace <path>', 'Workspace root path', process.cwd())
-  .option('-m, --mock', 'Use mock LLM provider instead of real API')
-  .option('-v, --verbose', 'Print full prompt and response')
-  .option('--dry-run', 'Plan actions without executing them')
-  .action(async (task: string, options: { config: string; workspace: string; mock: boolean; verbose: boolean; dryRun: boolean }) => {
-    const verbose = options.verbose;
-    const dryRun = options.dryRun;
-    const { config, registry, pipeline, hitl, audit, watcher, credManager } = await setupHarness(options.config, options.workspace);
+interface RunOptions {
+  config: string;
+  workspace: string;
+  mock?: boolean;
+  verbose?: boolean;
+  dryRun?: boolean;
+  execution?: string;
+  verify?: string;
+}
 
+async function performRun(task: string, options: RunOptions, previous?: StoredSession): Promise<void> {
+  const workspace = resolve(options.workspace);
+  const services = await setupHarness(options.config, workspace);
+  const { config, rules, pipeline, hitl, audit, watcher, credManager } = services;
+  if (options.execution) config.execution = { ...config.execution, mode: options.execution as 'local' | 'docker' };
+  validateConfig(config);
+  const tools = createWorkspaceTools(config, workspace);
+  const verifier = options.verify ?? previous?.verifier;
+  if (previous && options.verify !== undefined && options.verify !== previous.verifier) throw new Error('恢复时不能改变验收命令');
+  const configHash = sessionConfigHash(config, rules);
+  if (previous) assertSessionUnchanged(previous, workspace, configHash);
+  const runId = previous?.runId ?? randomUUID();
+  const tracePath = join(workspace, '.harness', 'runs', runId + '.jsonl');
+  const trace = createRunTrace(tracePath, runId);
+  const controller = new AbortController();
+  const interrupt = () => controller.abort(new Error('用户中断任务'));
+  process.once('SIGINT', interrupt);
+  const rl = readlinePromises.createInterface({ input: process.stdin, output: process.stdout });
+  const executor = createCommandExecutor({ workspaceRoot: workspace, mode: config.execution?.mode ?? 'docker', dockerImage: config.execution?.image, timeoutMs: config.execution?.timeout });
+  try {
     const llm = await resolveLLM(config, credManager, {
-      mock: options.mock,
-      mockResponses: [
-        {
-          content: `\`\`\`json\n{"action": {"type": "read_file", "params": {"path": "package.json"}}}\n\`\`\``,
-          usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
-        },
-        {
-          content: `\`\`\`json\n{"done": true, "summary": "Task completed successfully"}\n\`\`\``,
-          usage: { promptTokens: 200, completionTokens: 30, totalTokens: 230 },
-        },
-      ],
+      mock: !!options.mock,
+      mockResponses: [{ content: '{"done":true,"summary":"离线模式仅验证执行管道，不代表真实编码能力"}' }],
     });
-
-    const agent = createAgentLoop(config, llm, registry.list(), {
-      onAction: async (action: AgentAction, turn: number) => {
-        if (verbose) {
-          console.log(`[Turn ${turn}] Action: ${action.type}`, JSON.stringify(action.params));
-        }
-
-        if (dryRun) {
-          console.log(`  Would execute: ${action.type} ${JSON.stringify(action.params)}`);
-          return { allowed: false, reason: 'Dry-run mode' };
-        }
-
-        if (!verbose) {
-          console.log(`[Turn ${turn}] Action: ${action.type}`, JSON.stringify(action.params));
-        }
-        const result = pipeline.process(action);
-        audit.log({
-          timestamp: Date.now(),
-          action: { type: action.type, params: action.params },
-          result: {
-            allowed: result.allowed,
-            reason: result.reason,
-            requiresApproval: result.requiresApproval,
-          },
-        });
-        if (!result.allowed) {
-          if (result.requiresApproval) {
-            const approved = await hitl.requestInteractiveApproval(action);
-            if (approved) {
-              return { allowed: true };
-            }
-            return { allowed: false, reason: 'User denied approval' };
-          }
-          console.log(`  Guardrail blocked: ${result.reason}`);
-        }
-        return { allowed: result.allowed, reason: result.reason };
-      },
-      onTurn: (turn: ConversationTurn) => {
-        if (turn.result) {
-          console.log(`  Result: ${turn.result.success ? 'success' : 'failed'}`);
-          if (verbose && turn.result.output) {
-            console.log(`  Output: ${turn.result.output}`);
-          }
-          if (turn.result.error) {
-            console.log(`  Error: ${turn.result.error}`);
+    watcher.start();
+    const agent = createAgentLoop(config, traceProvider(llm, trace), tools, {
+      onAction: async (action, turn, context) => {
+        let decision = pipeline.process(action);
+        trace.event('policy', { turn, action, decision });
+        if (options.dryRun) return { allowed: false, reason: 'dry-run：跳过执行' };
+        let approvalResult: 'approved' | 'rejected' | undefined;
+        if (decision.requiresApproval) {
+          if (!process.stdin.isTTY) decision = { ...decision, allowed: false, reason: '非交互模式不能审批动作' };
+          else {
+            const answer = await rl.question('批准 ' + action.type + ' ' + JSON.stringify(action.params) + '？(y/N) ', { signal: context?.signal });
+            approvalResult = /^y(?:es)?$/i.test(answer.trim()) ? 'approved' : 'rejected';
+            if (approvalResult === 'approved') hitl.approve();
+            else hitl.reject('用户拒绝审批');
+            decision = approvalResult === 'approved' ? pipeline.process(action, true) : { ...decision, allowed: false, reason: '用户拒绝审批' };
+            trace.event('approval', { turn, action, approvalResult, decision });
           }
         }
+        audit.log({ timestamp: Date.now(), action, result: decision, approvalResult });
+        console.log('[' + turn + '] ' + action.type + '：' + (decision.allowed ? '执行' : decision.reason));
+        return { allowed: decision.allowed, reason: decision.reason };
       },
-      onStop: (reason: string) => {
-        console.log(`Stop reason: ${reason}`);
+      onTurn: (turn) => {
+        trace.event('tool_result', turn);
+        if (turn.result?.error) console.log('  ' + turn.result.error);
+        if (options.verbose && turn.result?.output) console.log(turn.result.output);
       },
-      onMessage: (messages: Array<{ role: string; content: string }>) => {
-        if (verbose) {
-          console.log('\n--- Messages sent to LLM ---');
-          for (const msg of messages) {
-            console.log(`[${msg.role}]: ${msg.content}`);
-          }
-          console.log('--- End of messages ---\n');
-        }
-      },
+      onMessage: (messages) => { if (options.verbose) console.log(JSON.stringify(messages, null, 2)); },
+      onCheckpoint: (checkpoint) => { saveSession(workspace, configHash, checkpoint, runId, verifier); },
+      onVerify: verifier && !options.dryRun ? async ({ signal }) => {
+        const decision = pipeline.process({ type: 'run_test', params: { command: verifier } });
+        const result = decision.allowed ? await executor.execute(verifier, { signal }) : { success: false, output: '', error: decision.reason || '验收命令被策略拒绝' };
+        trace.event('verification', { command: verifier, result });
+        return result;
+      } : undefined,
     });
+    trace.event(previous ? 'resumed' : 'started', { task, model: config.llm.model, provider: options.mock ? 'mock' : config.llm.provider, execution: config.execution, verifier, configHash });
+    console.log('会话：' + runId + '；执行模式：' + (config.execution?.mode ?? 'docker'));
+    const result = await agent.run(task, { checkpoint: previous?.checkpoint, signal: controller.signal });
+    trace.event('finished', { state: result.state, verified: result.verified, stopReason: result.stopReason, turns: result.turns, usage: result.usage, usageEstimated: result.usageEstimated });
+    console.log('状态：' + result.state + '；验收：' + (result.verified ? '通过' : '未通过或未配置') + '；停止原因：' + result.stopReason);
+    console.log('模型调用：' + result.turns + '；Token：' + result.usage.totalTokens + (result.usageEstimated ? '（含估算）' : ''));
+    console.log('摘要：' + result.summary + '\n轨迹：' + tracePath);
+    if (result.state !== 'completed' || (verifier && !result.verified)) process.exitCode = 1;
+  } catch (error) {
+    trace.event('error', { message: error instanceof Error ? error.message : String(error) });
+    throw error;
+  } finally {
+    watcher.stop();
+    rl.close();
+    process.removeListener('SIGINT', interrupt);
+  }
+}
 
-    console.log(`\nRunning task: ${task}\n`);
-    try {
-      const result = await agent.run(task);
-
-      console.log(`\n=== Task Complete ===`);
-      console.log(`Status: ${result.state}`);
-      console.log(`Turns: ${result.turns}`);
-      console.log(`Summary: ${result.summary}`);
-    } catch (error) {
-      console.error(`\n=== Task Failed ===`);
-      console.error(`Error: ${(error as Error).message}`);
-      process.exitCode = 1;
-    } finally {
-      // 关闭护栏文件监听，避免 fs.watch 让进程在任务结束后无法退出。
-      watcher.stop();
-    }
-  });
+program.command('run <task>')
+  .description('执行编码任务并保存会话检查点')
+  .option('-c, --config <path>', '配置路径，相对工作区', '.harness/config.yaml')
+  .option('-w, --workspace <path>', '工作区根路径', process.cwd())
+  .option('-m, --mock', '离线机制自检')
+  .option('-v, --verbose', '显示模型消息与工具输出')
+  .option('--dry-run', '只显示计划动作')
+  .option('--execution <mode>', 'docker 或显式 local')
+  .option('--verify <command>', '任务完成前必须通过的验证命令')
+  .action((task: string, options: RunOptions) => performRun(task, options));
 
 program
   .command('chat', { isDefault: true })
@@ -327,38 +265,36 @@ program
     });
 
     const rl = readlinePromises.createInterface({ input: process.stdin, output: process.stdout });
-    // stdin 关闭(EOF)时停止护栏监听，避免非 TTY 下 question 挂起导致进程无法退出。
-    rl.on('close', () => watcher.stop());
+    const controller = new AbortController();
+    const interrupt = () => { controller.abort(new Error('用户中断会话')); rl.close(); };
+    process.once('SIGINT', interrupt);
+    rl.on('SIGINT', interrupt);
+    rl.on('close', () => { controller.abort(new Error('会话输入已关闭')); watcher.stop(); });
+    const runId = randomUUID();
+    const trace = createRunTrace(join(resolve(options.workspace), '.harness', 'runs', runId + '.jsonl'), runId);
 
-    const chat = createChatLoop(config, llm, registry.list(), {
-      onAction: async (action: AgentAction) => {
-        console.log(`  Action: ${action.type} ${JSON.stringify(action.params)}`);
-        const result = pipeline.process(action);
-        audit.log({
-          timestamp: Date.now(),
-          action: { type: action.type, params: action.params },
-          result: {
-            allowed: result.allowed,
-            reason: result.reason,
-            requiresApproval: result.requiresApproval,
-          },
-        });
-        if (!result.allowed) {
-          if (result.requiresApproval) {
-            // 先置 pending，再询问；否则 approve/reject 会因 idle 状态抛错。
-            hitl.requestApproval(action);
-            const answer = await rl.question(`  [HITL] Approve ${action.type}? (y/N): `);
-            if (answer.toLowerCase().startsWith('y')) {
-              hitl.approve();
-              return { allowed: true };
-            }
-            hitl.reject('User denied');
-            return { allowed: false, reason: 'User denied' };
+    watcher.start();
+    const chat = createChatLoop(config, traceProvider(llm, trace), registry.list(), {
+      onAction: async (action, turn, context) => {
+        let decision = pipeline.process(action);
+        trace.event('policy', { turn, action, decision });
+        let approvalResult: 'approved' | 'rejected' | undefined;
+        if (decision.requiresApproval) {
+          if (!process.stdin.isTTY) decision = { ...decision, allowed: false, reason: '非交互模式不能审批动作' };
+          else {
+            const answer = await rl.question('批准 ' + action.type + ' ' + JSON.stringify(action.params) + '？(y/N) ', { signal: context?.signal });
+            approvalResult = /^y(?:es)?$/i.test(answer.trim()) ? 'approved' : 'rejected';
+            if (approvalResult === 'approved') hitl.approve();
+            else hitl.reject('用户拒绝审批');
+            decision = approvalResult === 'approved' ? pipeline.process(action, true) : { ...decision, allowed: false, reason: '用户拒绝审批' };
+            trace.event('approval', { turn, action, approvalResult, decision });
           }
-          console.log(`  Guardrail blocked: ${result.reason}`);
         }
-        return { allowed: result.allowed, reason: result.reason };
+        audit.log({ timestamp: Date.now(), action, result: decision, approvalResult });
+        console.log('  ' + action.type + '：' + (decision.allowed ? '执行' : decision.reason));
+        return { allowed: decision.allowed, reason: decision.reason };
       },
+      onTurn: (turn) => { trace.event('tool_result', turn); },
       onMessage: (messages: Array<{ role: string; content: string }>) => {
         if (verbose) {
           console.log('\n--- Messages sent to LLM ---');
@@ -374,19 +310,41 @@ program
 
     try {
       while (true) {
-        const input = (await rl.question('> ')).trim();
+        const input = (await rl.question('> ', { signal: controller.signal })).trim();
         if (!input) continue;
         if (['exit', 'quit', 'q'].includes(input.toLowerCase())) break;
 
-        const reply = await chat.send(input);
+        const reply = await chat.send(input, { signal: controller.signal });
         console.log(`\n${reply}\n`);
       }
+    } catch (error) {
+      trace.event('error', { message: error instanceof Error ? error.message : String(error) });
+      if (!controller.signal.aborted) throw error;
     } finally {
+      process.removeListener('SIGINT', interrupt);
       rl.close();
       watcher.stop();
     }
 
     console.log('Goodbye!');
+  });
+
+program.command('web').description('启动本地 Agent 工作台')
+  .option('-w, --workspace <path>', '工作区目录', process.cwd())
+  .option('-p, --port <number>', '本地服务端口', '4173')
+  .action(async (options: { workspace: string; port: string }) => {
+    const port = Number(options.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('端口必须是 1–65535 的整数');
+    const app = await startWebServer({ workspace: resolve(options.workspace), port });
+    console.log('本地工作台：' + app.url + '\n工作区：' + resolve(options.workspace));
+    const stop = async () => {
+      process.removeListener('SIGINT', interrupt);
+      process.removeListener('SIGTERM', interrupt);
+      await app.close();
+    };
+    const interrupt = () => { void stop().catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; }); };
+    process.once('SIGINT', interrupt);
+    process.once('SIGTERM', interrupt);
   });
 
 program
@@ -461,33 +419,8 @@ program
   .description('Initialize a new harness project')
   .option('-w, --workspace <path>', 'Workspace path', process.cwd())
   .action(async (options: { workspace: string }) => {
-    const workspace = options.workspace;
-    const harnessDir = join(workspace, '.harness');
-
-    if (!existsSync(harnessDir)) {
-      mkdirSync(harnessDir, { recursive: true });
-    }
-
-    const configPath = join(harnessDir, 'config.yaml');
-    if (!existsSync(configPath)) {
-      writeFileSync(configPath, DEFAULT_CONFIG_YAML, 'utf-8');
-      console.log('Created .harness/config.yaml');
-    } else {
-      console.log('.harness/config.yaml already exists, skipping');
-    }
-
-    const guardrailsPath = join(harnessDir, 'guardrails.yaml');
-    if (!existsSync(guardrailsPath)) {
-      writeFileSync(guardrailsPath, DEFAULT_GUARDRAILS_YAML, 'utf-8');
-      console.log('Created .harness/guardrails.yaml');
-    } else {
-      console.log('.harness/guardrails.yaml already exists, skipping');
-    }
-
-    const credDir = join(harnessDir, 'credentials');
-    if (!existsSync(credDir)) {
-      mkdirSync(credDir, { recursive: true });
-    }
+    const created = initializeWorkspace(options.workspace);
+    for (const name of ['config.yaml', 'guardrails.yaml']) console.log(created.includes(name) ? `Created .harness/${name}` : `.harness/${name} already exists, skipping`);
 
     console.log('Harness project initialized successfully!');
     console.log('Next steps:');
@@ -495,24 +428,20 @@ program
     console.log('  2. harness run "your task"      - Start coding');
   });
 
-program
-  .command('session resume')
-  .description('Resume from last session using audit log')
-  .option('-w, --workspace <path>', 'Workspace path', process.cwd())
-  .action(async (options: { workspace: string }) => {
-    const auditPath = join(options.workspace, '.harness/audit.log');
-    const sessionState = parseSessionState(auditPath);
-
-    if (!sessionState) {
-      console.log('No previous session found.');
-      return;
-    }
-
-    console.log(`Resuming session: ${sessionState.summary}`);
-    console.log(`Last turn: ${sessionState.lastTurn}`);
-    if (sessionState.lastAction) {
-      console.log(`Last action: ${sessionState.lastAction.type} ${JSON.stringify(sessionState.lastAction.params)}`);
-    }
+program.command('session').description('会话管理')
+  .command('resume [id]').description('恢复指定或最近会话')
+  .option('-c, --config <path>', '配置路径，相对工作区', '.harness/config.yaml')
+  .option('-w, --workspace <path>', '工作区目录', process.cwd())
+  .option('-m, --mock', '离线机制自检')
+  .option('-v, --verbose', '显示模型消息与工具输出')
+  .option('--execution <mode>', 'docker 或显式 local')
+  .option('--verify <command>', '必须与原验收命令一致')
+  .action(async (id: string | undefined, options: RunOptions) => {
+    const previous = loadSession(resolve(options.workspace), id);
+    await performRun(previous.checkpoint.task, options, previous);
   });
 
-program.parse();
+program.parseAsync().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

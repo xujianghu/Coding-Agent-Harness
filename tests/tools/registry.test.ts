@@ -1,13 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createToolRegistry } from '../../src/tools/registry';
-import type { ToolDefinition, ToolRegistry, AgentAction } from '../../src/core/types';
+import type { ToolDefinition, AgentAction } from '../../src/core/types';
+import type { ToolRegistry } from '../../src/tools/registry';
 
 function createMockTool(name: string): ToolDefinition {
   return {
     name,
     description: `Mock tool: ${name}`,
     parameters: {
-      input: { type: 'string', description: 'input param', required: true },
+      path: { type: 'string', description: '测试输入路径', required: true },
     },
     execute: async (params: Record<string, string>) => {
       return { success: true, output: `${name} executed with ${JSON.stringify(params)}` };
@@ -79,5 +80,28 @@ describe('ToolRegistry', () => {
     expect(result.success).toBe(false);
     expect(result.output).toBe('');
     expect(result.error).toBe('Unknown tool: unknown_tool');
+  });
+
+  it('拒绝缺失参数、错误类型和未知参数，工具不执行', async () => {
+    const tool = createMockTool('read_file');
+    tool.execute = vi.fn();
+    registry.register(tool);
+    expect((await registry.dispatch({ type: 'read_file', params: {} })).error).toContain('Missing required');
+    expect((await registry.dispatch({ type: 'read_file', params: { path: 42 } as never })).error).toContain('Invalid parameter type');
+    expect((await registry.dispatch({ type: 'read_file', params: { path: 'file', extra: 'bad' } })).error).toContain('Unknown parameter');
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it('传递 AbortSignal 并拒绝已经取消的执行', async () => {
+    const tool = createMockTool('read_file');
+    tool.execute = vi.fn().mockResolvedValue({ success: true, output: 'ok' });
+    registry.register(tool);
+    const controller = new AbortController();
+    const action: AgentAction = { type: 'read_file', params: { path: 'file' } };
+    await registry.dispatch(action, { signal: controller.signal });
+    expect(tool.execute).toHaveBeenCalledWith(action.params, { signal: controller.signal });
+    controller.abort();
+    expect((await registry.dispatch(action, { signal: controller.signal })).success).toBe(false);
+    expect(tool.execute).toHaveBeenCalledTimes(1);
   });
 });

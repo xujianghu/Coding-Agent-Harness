@@ -1,7 +1,7 @@
-import { watch, existsSync, readFileSync, FSWatcher } from 'fs';
-import { parse } from 'yaml';
+import { watch, existsSync, FSWatcher } from 'fs';
 import type { GuardrailEngine } from './guardrail';
 import type { GuardrailRule } from './rules';
+import { loadGuardrailRules } from './load-rules';
 
 export function createGuardrailWatcher(
   rulesPath: string,
@@ -16,15 +16,9 @@ export function createGuardrailWatcher(
         console.warn(`[Guardrail] Rules file not found: ${rulesPath}`);
         return;
       }
-      const content = readFileSync(rulesPath, 'utf-8');
-      const parsed = parse(content);
-      if (parsed && typeof parsed === 'object' && 'rules' in parsed) {
-        const newRules = (parsed as { rules: GuardrailRule[] }).rules;
-        engine.replaceRules(newRules);
-        onReload?.(newRules);
-      } else {
-        console.warn('[Guardrail] Invalid rules file format, keeping old rules');
-      }
+      const newRules = loadGuardrailRules(rulesPath);
+      engine.replaceRules(newRules);
+      onReload?.(newRules);
     } catch (err) {
       console.warn(`[Guardrail] Failed to reload rules: ${err}`);
     }

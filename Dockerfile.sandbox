@@ -1,0 +1,6 @@
+FROM node:22-alpine
+
+# 工具镜像提前构建，Agent 执行阶段默认禁止联网。
+RUN apk add --no-cache git
+WORKDIR /workspace
+ENV HOME=/tmp

@@ -1,223 +1,176 @@
 # Coding Agent Harness
 
-从零构建的 TypeScript CLI 编码智能体，纯命令行工具（无 WebUI），通过 LLM 驱动自动执行编码任务，内置多层治理护栏保障执行安全。
+[![持续集成](https://github.com/xujianghu/Coding-Agent-Harness/actions/workflows/ci.yml/badge.svg?branch=codex%2Fagent-harness-upgrade)](https://github.com/xujianghu/Coding-Agent-Harness/actions/workflows/ci.yml)
 
-```
-┌─────────────────────────────────────────────────────┐
-│                     CLI (harness)                    │
-├─────────────────────────────────────────────────────┤
-│  ┌──────────┐  ┌──────────────────────────────────┐ │
-│  │  Config  │  │          Agent 主循环              │ │
-│  │  Loader  │  │  Prompt → LLM → Parse → Execute   │ │
-│  └──────────┘  └──────────┬───────────────────────┘ │
-│                           │                          │
-│  ┌────────────────────────┼────────────────────────┐ │
-│  │           Governance Pipeline                   │ │
-│  │  Guardrail → HITL → Sandbox → Audit             │ │
-│  └────────────────────────┼────────────────────────┘ │
-│                           │                          │
-│  ┌──────────┐  ┌──────────┼──────────┐  ┌─────────┐ │
-│  │  Memory  │  │       Tools          │  │   LLM   │ │
-│  │  Store   │  │ File | Shell | Test  │  │ Mock    │ │
-│  │ Retriever│  │   Lint | Registry    │  │ OpenAI  │ │
-│  └──────────┘  └─────────────────────┘  │ Anthropic│ │
-│                                          │ Gemini   │ │
-│  ┌──────────────────────────────────┐    └─────────┘ │
-│  │  Feedback Loop                   │                │
-│  │  Runner → Parser → Injector      │                │
-│  └──────────────────────────────────┘                │
-└─────────────────────────────────────────────────────┘
-```
+**可验收、可恢复的编码 Agent 执行框架，配套 CLI 与 React 会话工作台。**
 
-## 快速开始
+将模型工具调用、动作治理、隔离执行、失败反馈与检查点恢复连接成可追踪的开发流程；通过独立验收，区分“模型认为完成”和“代码通过检查”。适合学习 Coding Agent 工程、构建本地编码助手，以及研究反馈机制对任务结果的影响。
 
-```bash
-# 1. 安装
-npm install -g coding-agent-harness
+当前源码版本为 `1.1.0`，升级内容位于 [`codex/agent-harness-upgrade`](https://github.com/xujianghu/Coding-Agent-Harness/tree/codex/agent-harness-upgrade) 分支。请从源码安装；该说明不代表此版本已发布到 npm。
 
-# 2. 配置 API Key
-harness key set openai
+![会话工作台：连续对话、执行审批、文件浏览与逐轮 Diff](docs/ui-preview.jpg)
 
-# 3. 执行任务
-harness run "创建一个 package.json 文件"
+文档更新：2026-10-13。
 
-# 4. 进入交互式对话（多轮有上下文）
-harness
-```
+## 核心能力
 
-## 安装指南
+| 能力 | 当前实现 |
+| --- | --- |
+| 模型与工具协议 | OpenAI、Anthropic、Gemini 原生工具调用；调用 ID 与结果对应；文本 JSON 动作回退 |
+| 仓库操作 | 文件读写与删除、文件搜索、字面代码搜索、分段读取；精确补丁支持 SHA-256 检查，拒绝过期修改与多处匹配 |
+| 治理与审批 | 文件边界、护栏规则、命令白名单与人工审批；审批后重新校验策略 |
+| 隔离执行 | 命令默认使用 Docker，限制网络、权限、资源与输出；支持超时和取消清理 |
+| 验收与修复 | `completed` 与 `verified` 分离；配置验收后，失败反馈进入下一轮修复 |
+| 预算与恢复 | 轮次、时间、Token 预算；完整工具消息组成组裁剪；检查点、执行轨迹与安全恢复 |
+| 本地项目 | 网页输入绝对路径、浏览本机目录、打开与切换最近项目；按项目读取会话、运行和评测报告 |
+| 会话工作台 | 连续追加需求、执行状态、审批、取消与恢复；只读文件浏览、逐轮 Diff、历史与评测报告 |
+| 对照评测 | 10 个冻结修复任务，支持 `baseline`、`full`、`no-feedback`；独立隐藏验收与逐次结果记录 |
 
-- **Node.js** >= 20
-- 全局安装：`npm install -g coding-agent-harness`
-- 本地安装：`git clone <repo> && npm install && npm run build`
+## 无需 Key 的快速演示
 
-## 使用说明
-
-### `harness run <task>`
-
-执行编码任务。Agent 会读取当前工作目录，调用 LLM 分析任务，并依次执行工具操作。
+需要 **Node.js 22.12+（22 系列）或 24+** 和 npm。以下演示不需要模型 Key 或 Docker。
 
 ```bash
-harness run "创建一个 TypeScript 工具函数"
-harness run -c .harness/config.yaml -w ./my-project "修复所有 lint 错误"
-```
-
-| 选项 | 说明 | 默认值 |
-|------|------|--------|
-| `-c, --config <path>` | 配置文件路径 | `.harness/config.yaml` |
-| `-w, --workspace <path>` | 工作区根路径 | 当前目录 |
-
-### `harness chat`（或直接 `harness`）
-
-进入交互式对话模式：多轮有上下文的对话，agent 既能文字回复，也能调用工具（读写文件、跑命令、跑测试）。
-
-```bash
-harness            # 无参数直接进入（默认命令）
-harness chat       # 或显式子命令
-```
-
-进入后逐行输入即可，输入 `exit` / `quit` / `q` 退出：
-
-```
-> 你好
-> 在 src 目录下创建一个 utils.ts
-> exit
-```
-
-| 选项 | 说明 | 默认值 |
-|------|------|--------|
-| `-c, --config <path>` | 配置文件路径 | `.harness/config.yaml` |
-| `-w, --workspace <path>` | 工作区根路径 | 当前目录 |
-| `-m, --mock` | 使用 mock LLM（不调真实 API） | 关闭 |
-| `-v, --verbose` | 打印发给 LLM 的完整消息 | 关闭 |
-
-### `harness key set <provider>`
-
-配置 API Key，交互式输入，输入内容不会回显在终端。
-
-```bash
-harness key set openai      # 配置 OpenAI
-harness key set anthropic   # 配置 Anthropic
-harness key set gemini      # 配置 Gemini
-```
-
-### `harness key status`
-
-查看各 Provider 的 Key 配置状态。
-
-```
-$ harness key status
-API Key Status:
-  openai: configured
-  anthropic: not configured
-  gemini: not configured
-```
-
-### `harness key clear <provider>`
-
-删除指定 Provider 的 API Key，需二次确认。
-
-```bash
-harness key clear openai
-```
-
-## Key 安全配置
-
-- 所有 API Key 存储在 `.harness/credentials/credentials.json`，该路径已加入 `.gitignore`
-- 设置 `HARNESS_MASTER_PASSWORD` 环境变量后，Key 使用 **AES-256-GCM** 加密存储（随机 IV + 认证标签），主密码不落盘
-- **未设置主密码时退化为明文 JSON 存储**，启动时会打印告警——生产环境务必设置 `HARNESS_MASTER_PASSWORD`
-- 输入 Key 时**终端不回显明文**
-- `harness key status` 只显示 `configured` / `not configured`，**绝不输出明文 Key**
-
-## 接入 DeepSeek / 其他 OpenAI 兼容服务
-
-DeepSeek 的 API 兼容 OpenAI 协议，无需新增 provider，通过 `baseUrl` 即可接入：
-
-```yaml
-# .harness/config.yaml
-llm:
-  provider: openai            # 复用 openai 适配器
-  model: deepseek-chat        # 或 deepseek-reasoner（推理）
-  baseUrl: https://api.deepseek.com
-```
-
-然后配置 DeepSeek 的 key（`harness key set openai`，或设置 `OPENAI_API_KEY` 环境变量），
-运行 `harness run "你的任务"` 即可。其余 OpenAI 兼容服务（如 Moonshot、通义千问）同理，只需替换 `baseUrl` 与 `model`。
-
-## 分发方式
-
-### Docker
-
-```bash
-docker build -t coding-agent-harness .
-docker run -it -v $(pwd):/workspace coding-agent-harness run "你的任务"
-```
-
-### npm
-
-```bash
-npm install -g coding-agent-harness
-harness run "你的任务"
-```
-
-## 目录结构
-
-```
-src/core/         # Agent 主循环（loop 任务执行 + chat 对话）
-src/llm/          # LLM 抽象层（Mock + OpenAI + Anthropic + Gemini，原生 function calling）
-src/tools/        # 工具系统（文件读写/删除 + Shell + 测试 + Lint）
-src/governance/   # 治理护栏（护栏引擎 + HITL + 沙箱 + 管道 + 审计）
-src/config/       # 配置系统
-src/credential/   # 凭据管理
-src/cli/          # CLI 入口
-tests/            # 单元测试（mock LLM 驱动）
-demo/             # 机制演示脚本
-```
-
-## 安全边界说明
-
-以下操作会被**自动拦截**（无需人工确认）：
-
-| 拦截操作 | 规则 |
-|----------|------|
-| `rm -rf /` | 禁止递归删除根目录 |
-| `git push --force` | 禁止 force push |
-| `git reset --hard` | 禁止硬重置 |
-| `curl \| bash` | 禁止管道执行远程脚本 |
-| `chmod 777` | 禁止危险权限修改 |
-| 写入沙箱外路径 | 路径白名单校验 |
-
-以下操作需要**人工审批**：
-
-| 审批操作 | 规则 |
-|----------|------|
-| `sudo ...` | 需要 HITL 人工确认 |
-
-治理管道执行顺序：**Guardrail（正则匹配）→ HITL（人工审批）→ Sandbox（路径/命令白名单）→ Audit（审计日志）**。
-
-## 已知限制
-
-- 纯 CLI 工具，无 WebUI
-- 需要 Node.js 20+
-- 凭据默认存本地 JSON 文件；设置 `HARNESS_MASTER_PASSWORD` 后 AES-256-GCM 加密
-- 护栏规则为静态正则匹配，不支持语义分析
-- 真实 LLM 适配已实现（OpenAI / Anthropic / Gemini，以及通过 `baseUrl` 接入的 DeepSeek 等 OpenAI 兼容服务），需自备 API key
-
-## 开发指南
-
-```bash
-# 安装依赖
-npm install
-
-# 编译 TypeScript
+git clone --branch codex/agent-harness-upgrade https://github.com/xujianghu/Coding-Agent-Harness.git
+cd Coding-Agent-Harness
+npm ci
 npm run build
-
-# 运行测试
-npm test
-
-# 运行机制演示
-npm run demo
-
-# 本地执行
-npm start run "你的任务"
+npm run web
 ```
+
+打开终端输出的本地地址，默认是 `http://127.0.0.1:4173`：
+
+1. 新建“机制演示”会话，发送“修复金额计算错误，并运行测试验证”。
+2. 查看文件创建、读取和补丁事件，在验收审批处批准执行。
+3. 查看任务结束与验收通过状态，打开文件面板和 Diff。
+4. 继续发送“为金额计算补充使用说明”，查看第二轮记录；刷新页面检查会话持久化。
+
+演示会真实操作独立目录中的文件并运行固定测试，模型响应来自预设脚本。它验证执行机制，**不代表能够离线理解任意任务，也不衡量真实模型编码能力**。完整步骤见 [快速开始](docs/getting-started.md) 和 [项目演示](docs/project-showcase.md)。
+
+## 打开本地代码项目
+
+点击左侧项目名称，打开“打开本地项目”对话框。可以输入代码目录的绝对路径、逐级浏览本机目录，或从“最近项目”切换；例如 `D:\projects\my-app`。选择的是运行 Harness 服务这台电脑上的目录，源码文件直接从该目录读取。
+
+![网页打开本地项目：目录浏览、初始化选项与最近项目](docs/local-projects.png)
+
+未初始化的项目也能只读浏览源码、创建机制演示会话。默认打开不会生成配置或调用模型；需要真实任务时，勾选“初始化 Harness 配置（仅创建缺失文件）”，再配置目标项目的模型与凭据。会话和运行按项目保存，执行中或等待审批时需要先完成或取消任务再切换。
+
+完整操作与常见问题见 [本地项目使用步骤](docs/getting-started.md#在工作台使用自己的项目)，页面验收记录见 [工作台功能验收](docs/workbench-verification.md)。
+
+## 执行真实任务
+
+真实任务需要可用模型凭据和已启动的 Docker。先将下面的 `../your-project` 替换为目标项目路径；在 Harness 仓库根目录执行：
+
+```bash
+node dist/cli/index.js init --workspace ../your-project
+docker pull node:22-alpine
+```
+
+检查目标项目的 `.harness/config.yaml` 中的 `provider`、`model` 和可选 `baseUrl`。仓库自带的是无密钥 OpenAI 兼容服务配置示例，`init` 不会覆盖已有配置；请按实际服务调整。通过对应的 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 `GEMINI_API_KEY` 环境变量提供凭据，然后执行：
+
+```bash
+node dist/cli/index.js run "修复分页边界错误，保持现有接口并补充回归用例" --workspace ../your-project --verify "npm test"
+```
+
+这个示例面向使用 `npm test` 的 Node.js 项目，请按实际项目修改验收命令。默认容器禁止联网，必须提前准备 Linux 兼容依赖或包含依赖的执行镜像；`node:22-alpine` 不包含 Maven、JDK 或 Git。Java 项目需要单独准备执行镜像和命令白名单，详见 [配置与执行环境](docs/configuration.md)。
+
+任务会修改目标工作区；建议使用 Git 跟踪初始状态。未指定 `--verify` 时，即使模型声明完成，`verified` 仍为 `false`。恢复中断任务可使用 `node dist/cli/index.js session resume <id> --workspace ../your-project`；恢复保留原预算，并检查工作区、配置与执行状态是否一致。
+
+## 执行流程
+
+```mermaid
+flowchart LR
+    Entry[CLI / React 工作台] --> Loop[Agent 主循环]
+    Loop <--> LLM[模型与工具协议]
+    Loop --> Policy[动作治理与人工审批]
+    Policy --> Tools[文件工具 / Docker 命令执行]
+    Tools -->|工具结果| Loop
+    Loop -->|声明完成| Verify[任务验收]
+    Verify -->|失败反馈| Loop
+    Verify -->|通过| Result[完成且已验证]
+    Loop --> Store[检查点与执行轨迹]
+```
+
+会话中的新消息创建新运行，继承经过校验的历史上下文并开启新预算；恢复操作继续原运行与累计预算。历史工具结果不会自动重放，结果未知的动作会阻止自动恢复。协议和边界详见 [架构说明](docs/architecture.md)。
+
+## 评测与验证
+
+评测使用相同任务、模型、工具与预算，比较三种完成反馈机制：
+
+| 模式 | 模型声明完成后的处理 |
+| --- | --- |
+| `baseline` | 停止执行，交由独立隐藏验收评分 |
+| `full` | 运行公开测试，将失败诊断反馈给模型继续修复，再独立评分 |
+| `no-feedback` | 保留测试失败状态，移除失败诊断，再独立评分 |
+
+每次尝试使用独立工作区；隐藏验收在候选工作区之外，评分检查允许修改范围，并记录失败尝试、补丁、轨迹、用量与复现信息。
+
+```bash
+npm test
+npm run eval:smoke
+npm run test:package
+```
+
+本地项目与工作台升级的工程验证：**364 个测试通过、10 个跳过**，构建、安装包与实际浏览器交互验收通过，见 [验收记录](docs/workbench-verification.md)。此前 [`9615b77`](https://github.com/xujianghu/Coding-Agent-Harness/commit/9615b7752d278b0c0ac51e6966a1f1f763c1b01c) 的离线机制自检为 **30/30 通过**（10 个任务 × 3 种模式）。这些是工程测试与固定脚本结果，**仓库尚未提供真实模型成功率数据**；当前任务集也不覆盖大型仓库或 Java 工程。
+
+真实评测在配置和凭据准备完成后执行，会产生 API 费用，并强制使用 Docker：
+
+```bash
+node dist/eval/cli.js --config .harness/config.yaml --mode all --repeat 3
+```
+
+报告默认保存在 `.harness/eval-results/<run-id>/`，包含逐次结果、候选代码、差异与调用轨迹。实际 usage 与估算 usage 分开记录，未核实的费用保持未知。任务、评分协议和实验方法见 [评测指南](eval/README.md)，开发检查见 [开发与验证](docs/development.md)。
+
+## 当前边界
+
+- 工作台面向本机单用户，只监听回环地址；可以切换本地项目，同一服务一次执行一个 run，不提供多用户或公网部署能力。
+- 同一项目内不同真实会话共享代码目录，尚未实现每会话 worktree；文件面板只读，Diff 为有界预览。
+- SSE 推送执行快照，尚未实现模型逐 Token 输出或执行中追加指令。
+- Docker 不可用时不会自动退回 `local`；显式 `local` 执行拥有宿主用户权限，不提供容器隔离。
+- 目前没有产品内置多 Agent 调度、MCP 扩展、语义仓库索引或 Java 评测集。
+
+更完整的凭据、文件与执行边界见 [配置与执行环境](docs/configuration.md) 和 [架构说明](docs/architecture.md)。
+
+## 仓库结构
+
+```text
+src/
+  core/          主循环、上下文、预算与检查点协议
+  llm/           模型提供商与 mock 适配
+  tools/         文件、搜索、补丁与命令执行器
+  governance/    护栏、审批、工作区边界与审计
+  cli/           任务入口、检查点与执行轨迹
+  web/           本地项目选择、工作台 API、会话与运行管理
+  eval/          评测运行、独立评分与报告
+frontend/        React / TypeScript / Vite 工作台
+eval/            冻结任务、公开测试、隐藏验收与 mock 解法
+tests/           回归、集成与 Docker 测试
+scripts/         安装包与容器验证脚本
+demo/            执行机制演示
+docs/            使用、设计、开发与展示文档
+  history/       早期设计与开发记录
+.github/         持续集成与仓库协作配置
+```
+
+## 文档导航
+
+| 文档 | 内容 |
+| --- | --- |
+| [快速开始](docs/getting-started.md) | 环境准备、离线演示、真实任务与常见问题 |
+| [配置与执行环境](docs/configuration.md) | 模型、凭据、预算、Docker 与治理规则 |
+| [架构说明](docs/architecture.md) | 工具协议、会话、验收、恢复与隔离边界 |
+| [评测指南](eval/README.md) | 任务集、独立评分、对照实验与报告 |
+| [开发与验证](docs/development.md) | 本地开发、测试、构建与 CI |
+| [工作台功能验收](docs/workbench-verification.md) | 本地项目与网页功能的检查结果及验证边界 |
+| [参与贡献](CONTRIBUTING.md) | 问题反馈、修改提交与文档约定 |
+| [项目演示与简历表达](docs/project-showcase.md) | 五分钟演示、实现贡献与证据要求 |
+| [改进路线图](docs/roadmap.md) | 实施优先级、交付目标与验证方式 |
+| [历史材料](docs/history/) | 早期规格、计划与开发记录，不作为当前功能说明 |
+
+## 改进路线图
+
+- **P0：** 真实模型对照评测、Java/Maven 任务、仓库索引与上下文压缩。
+- **P1：** 会话独立 worktree、Git 修改审查与交付、模型流式输出与安全追加指令。
+- **P2：** Skills / MCP 扩展、受控任务规划与多 Agent、效果和成本分析。
+
+这些是后续计划。验收标准与依赖关系见 [改进路线图](docs/roadmap.md)。

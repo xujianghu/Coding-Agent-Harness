@@ -1,0 +1,34 @@
+name: 缺陷报告
+description: 提供可复现步骤，帮助定位执行、工作台或评测问题
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: 请勿提交 API Key、凭据文件、私人源码或未经检查的完整运行轨迹。
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 操作系统、Node.js 版本、Harness 提交、Docker 版本以及 mock/真实模型和 local/docker 模式。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 提供最小任务、执行命令及必要的已脱敏配置。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 提供错误、停止原因或脱敏后的相关日志片段。
+    validations:
+      required: true

@@ -1,5 +1,16 @@
 import OpenAI from 'openai';
-import { LLMProvider, LLMResponse, ToolDefinition } from '../core/types';
+import { LLMProvider, LLMResponse, ToolDefinition, LLMMessage, LLMCompletionOptions } from '../core/types';
+
+function toMessages(messages: LLMMessage[]): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  return messages.map(message => {
+    if (message.role === 'tool') return { role: 'tool', content: message.content, tool_call_id: message.toolCallId! };
+    if (message.toolCalls?.length) return {
+      role: 'assistant', content: message.content || null,
+      tool_calls: message.toolCalls.map(call => ({ id: call.id!, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })),
+    };
+    return { role: message.role as 'system' | 'user' | 'assistant', content: message.content };
+  });
+}
 
 function toOpenAITools(tools: ToolDefinition[]) {
   return tools.map((t) => ({
@@ -28,14 +39,17 @@ export function createOpenAIProvider(config: {
   return {
     name: 'openai',
     complete: async (
-      messages: Array<{ role: string; content: string }>,
+      messages: LLMMessage[],
       tools?: ToolDefinition[],
+      options?: LLMCompletionOptions,
     ): Promise<LLMResponse> => {
       const response = await client.chat.completions.create({
         model: config.model,
-        messages: messages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+        messages: toMessages(messages),
         ...(tools && tools.length > 0 ? { tools: toOpenAITools(tools) } : {}),
-      });
+        ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
+        ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+      }, ...options?.signal ? [{ signal: options.signal }] : []);
 
       const choice = response.choices[0];
       const content = choice?.message?.content ?? '';
@@ -44,6 +58,7 @@ export function createOpenAIProvider(config: {
 
       if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0) {
         result.toolCalls = choice.message.tool_calls.map((tc) => ({
+          ...(tc.id ? { id: tc.id } : {}),
           name: tc.function.name,
           arguments: JSON.parse(tc.function.arguments),
         }));
@@ -60,14 +75,18 @@ export function createOpenAIProvider(config: {
       return result;
     },
     completeStream: async (
-      messages: Array<{ role: string; content: string }>,
-      onToken: (token: string) => void
+      messages: LLMMessage[],
+      onToken: (token: string) => void,
+      options?: LLMCompletionOptions,
     ): Promise<LLMResponse> => {
       const stream = await client.chat.completions.create({
         model: config.model,
-        messages: messages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+        messages: toMessages(messages),
         stream: true,
-      });
+        stream_options: { include_usage: true },
+        ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
+        ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+      }, ...options?.signal ? [{ signal: options.signal }] : []);
 
       let content = '';
       let usage: LLMResponse['usage'];

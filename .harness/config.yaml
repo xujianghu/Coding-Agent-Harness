@@ -7,6 +7,11 @@ llm:
 agent:
   maxTurns: 50
   timeout: 300000
+  maxTotalTokens: 100000
+execution:
+  mode: docker
+  image: node:22-alpine
+  timeout: 120000
 governance:
   rulesFile: .harness/guardrails.yaml
   sandbox:
@@ -30,3 +35,5 @@ governance:
 memory:
   storagePath: .harness/memory/
   maxConversationTurns: 20
+  maxContextTokens: 16000
+  maxToolOutputChars: 12000
