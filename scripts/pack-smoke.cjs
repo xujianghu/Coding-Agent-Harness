@@ -36,9 +36,11 @@ try {
         const page = await fetch(app.url);
         if (!page.ok || !(await page.text()).includes('id="root"')) throw new Error('安装包前端不可用');
         const api = await fetch(new URL('/api/workspace',app.url));
-        if (!api.ok || !(await api.json()).workspace) throw new Error('安装包工作台API不可用');
+        const workspaceInfo = await api.json();
+        if (!api.ok || !workspaceInfo.workspace || !workspaceInfo.projectId) throw new Error('安装包工作台API不可用');
+        let projectId = workspaceInfo.projectId;
         const request = async (route, body) => {
-          const response = await fetch(new URL(route, app.url), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+          const response = await fetch(new URL(route, app.url), {method:'POST',headers:{'Content-Type':'application/json','X-Harness-Project':projectId},body:JSON.stringify(body)});
           if (!response.ok) throw new Error('安装包会话API不可用：'+route);
           return response.json();
         };
@@ -58,6 +60,24 @@ try {
         controller.abort();
         await reader.cancel().catch(() => {});
         await request('/api/runs/'+run.id+'/cancel', {});
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const secondWorkspace = path.join(${JSON.stringify(directory)}, 'second-project');
+        fs.mkdirSync(secondWorkspace);
+        fs.writeFileSync(path.join(secondWorkspace, 'sample.js'), 'module.exports = 42;');
+        const projectListing = await fetch(new URL('/api/projects', app.url));
+        if (!projectListing.ok || !(await projectListing.json()).projects.length) throw new Error('安装包项目列表不可用');
+        const opened = await request('/api/projects/open', {path:secondWorkspace});
+        projectId = opened.workspace.projectId;
+        if (!projectId || opened.workspace.initialized || fs.existsSync(path.join(secondWorkspace, '.harness'))) throw new Error('打开项目不应隐式初始化');
+        const source = await fetch(new URL('/api/file?path=sample.js', app.url), {headers:{'X-Harness-Project':projectId}});
+        if (!source.ok || !(await source.json()).content.includes('42')) throw new Error('安装包不能浏览本地项目代码');
+        const initialized = await request('/api/projects/open', {path:secondWorkspace,initialize:true});
+        if (!initialized.workspace.initialized || !fs.existsSync(path.join(secondWorkspace, '.harness', 'config.yaml'))) throw new Error('安装包项目初始化不可用');
+        const returned = await request('/api/projects/open', {path:${JSON.stringify(workspace)}});
+        projectId = returned.workspace.projectId;
+        const saved = await fetch(new URL('/api/conversations/'+conversation.id, app.url), {headers:{'X-Harness-Project':projectId}});
+        if (!saved.ok || (await saved.json()).id !== conversation.id) throw new Error('切回项目丢失会话');
       } finally { await app.close(); }
     })().catch(error => { console.error(error);process.exitCode=1; });
   `;

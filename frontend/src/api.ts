@@ -40,6 +40,8 @@ export interface Run {
 }
 
 export interface WorkspaceInfo {
+  projectId: string;
+  initialized: boolean;
   workspace: string;
   config: {
     llm?: { provider?: string; model?: string; apiKeyConfigured?: boolean };
@@ -90,12 +92,33 @@ export interface FileEntry { name: string; path: string; kind: 'file' | 'directo
 export interface FileListing { path: string; entries: FileEntry[]; truncated: boolean }
 export interface FileContent { path: string; content: string; size: number; sha256: string }
 
+export interface Project { id: string; name: string; path: string; initialized: boolean; lastOpenedAt: number }
+export interface ProjectListing { activeProjectId: string; projects: Project[]; canSwitch: boolean; blockedReason?: string }
+export interface DirectoryListing { path: string; parent: string | null; entries: { name: string; path: string }[]; roots: { name: string; path: string }[]; truncated: boolean }
+
+let activeProjectId: string | null = null;
+let projectGeneration = 0;
+export function bindProject(id: string | null) { activeProjectId = id; projectGeneration += 1; }
+export const getProjectGeneration = () => projectGeneration;
+export class RequestError extends Error {
+  constructor(message: string, public readonly code?: string) { super(message); }
+}
+export const staleRequest = (cause: unknown) => cause instanceof RequestError && cause.code === 'STALE_PROJECT' || cause instanceof DOMException && cause.name === 'AbortError';
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const generation = projectGeneration;
+  const projectId = activeProjectId;
+  const unscoped = path === '/workspace' || path === '/projects' || path.startsWith('/projects/directories');
+  if (!unscoped && !projectId) throw new RequestError('请先读取当前项目。', 'STALE_PROJECT');
+  const headers = new Headers(init.headers);
+  if (init.body) headers.set('Content-Type', 'application/json');
+  if (projectId) headers.set('X-Harness-Project', projectId);
   const response = await fetch(`/api${path}`, {
     ...init,
-    headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
+    headers,
   });
   const text = await response.text();
+  if (generation !== projectGeneration || init.signal?.aborted) throw new RequestError('项目已切换，旧请求已作废。', 'STALE_PROJECT');
   let data: unknown;
   try {
     data = text ? JSON.parse(text) : {};
@@ -103,8 +126,10 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     throw new Error(response.ok ? '服务返回了无法读取的内容。' : `请求失败（${response.status}）。`);
   }
   if (!response.ok) {
-    const error = data as { error?: string | { message?: string }; message?: string };
-    throw new Error(typeof error.error === 'string' ? error.error : error.error?.message ?? error.message ?? `请求失败（${response.status}）。`);
+    const error = data as { error?: string | { message?: string; code?: string }; message?: string; code?: string };
+    const code = typeof error.error === 'object' ? error.error?.code ?? error.code : error.code;
+    if (code === 'PROJECT_REQUIRED' || code === 'PROJECT_CHANGED') window.dispatchEvent(new CustomEvent('harness-project-changed'));
+    throw new RequestError(typeof error.error === 'string' ? error.error : error.error?.message ?? error.message ?? `请求失败（${response.status}）。`, code);
   }
   return data as T;
 }

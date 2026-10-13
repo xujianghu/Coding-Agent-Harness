@@ -2,6 +2,8 @@
 
 [返回项目首页](../README.md) · [快速开始](getting-started.md) · [配置与安全边界](configuration.md) · [架构说明](architecture.md)
 
+文档更新：2026-10-13。
+
 本项目使用 TypeScript 构建 Harness，前端使用 React 和 Vite。Node.js 要求为 `^22.12.0 || >=24`，CI 使用 Node.js 24。
 
 ## 开发命令
@@ -29,7 +31,7 @@ npm run test:package
 | `npm run demo` | 三个固定机制示例 |
 | `npm run eval -- <参数>` | 启动评测 CLI，真实模式需要显式配置与凭据 |
 | `npm run eval:smoke` | 10 个固定任务在三种模式下的 mock 自检 |
-| `npm run test:package` | 将包安装到临时目录，检查两个 CLI、包内评测资产、工作台页面/API、会话和事件流 |
+| `npm run test:package` | 将包安装到临时目录，检查两个 CLI、包内评测资产、工作台页面/API、会话和事件流；实际覆盖范围以脚本为准 |
 | `npm run check` | 汇总构建、单元测试、mock 评测和打包检查；不包含 Docker 测试与 `demo` |
 | `npm start -- <参数>` | 启动已构建的 Harness CLI，默认进入交互模式 |
 
@@ -47,6 +49,8 @@ npm run test:docker
 该脚本通过 `HARNESS_DOCKER_TESTS=1` 运行 `tests/tools/executor-docker.test.ts` 和 `tests/eval/`，覆盖实际容器边界、超时、取消与候选评分。普通测试通过不能替代这项检查。
 
 前端双终端开发和首次使用见 [快速开始](getting-started.md#开发前端)。生产页面输出到 `dist/web-ui/`，并随 npm 包发布。
+
+本地项目选择与切换由 `src/web/projects.ts` 管理，配置初始化位于 `src/config/initialize.ts`，项目回归用例位于 `tests/web/projects.test.ts`。修改这些流程时需检查未初始化目录浏览、配置不覆盖、执行中切换拒绝、项目历史隔离、旧请求与 SSE 失效。网页操作检查记录见 [工作台功能验收](workbench-verification.md)，mock 页面演示仍不能证明真实模型编码成功率。
 
 ## 可复现评测
 
@@ -112,9 +116,9 @@ src/llm/           原生工具调用适配与 mock
 src/tools/         文件定位、补丁和统一执行器
 src/governance/    护栏、审批、边界检查与审计
 src/credential/    模型凭据管理
-src/config/        配置合并与校验
+src/config/        配置合并、校验与缺失文件初始化
 src/cli/           任务 CLI、会话存储与轨迹
-src/web/           本地工作台 API、会话与运行服务
+src/web/           本地项目选择、工作台 API、会话与运行服务
 frontend/          React 工作台与响应式样式
 src/eval/          评测运行、独立评分与报告
 eval/              固定任务、公开测试、隐藏验收与 mock 修复

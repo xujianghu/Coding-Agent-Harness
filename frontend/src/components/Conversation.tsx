@@ -51,6 +51,9 @@ interface ChatProps {
   globalActive: boolean;
   streamError: string;
   onNew: () => void;
+  onOpenProject: () => void;
+  workspace?: string;
+  disabled?: boolean;
   onSend: (content: string) => Promise<boolean>;
   onSelectRun: (id: string) => void;
   onCancel: () => void;
@@ -58,7 +61,7 @@ interface ChatProps {
   onApprove: (id: string, approved: boolean) => void;
 }
 
-export function ConversationView({ conversation, selectedRun, loading, busy, globalActive, streamError, onNew, onSend, onSelectRun, onCancel, onResume, onApprove }: ChatProps) {
+export function ConversationView({ conversation, selectedRun, loading, busy, globalActive, streamError, onNew, onOpenProject, workspace, disabled, onSend, onSelectRun, onCancel, onResume, onApprove }: ChatProps) {
   const [content, setContent] = useState('');
   const [validation, setValidation] = useState('');
   const [atBottom, setAtBottom] = useState(true);
@@ -68,7 +71,7 @@ export function ConversationView({ conversation, selectedRun, loading, busy, glo
   const submitting = useRef(false);
   const latestRun = conversation?.runs.at(-1) ?? null;
   const active = latestRun && isActive(latestRun.status);
-  const canSend = !!conversation?.canSend && !busy && !globalActive;
+  const canSend = !!conversation?.canSend && !busy && !globalActive && !disabled;
   const messages = conversation?.messages ?? [];
   useEffect(() => { setContent(''); setValidation(''); setAtBottom(true); }, [conversation?.id]);
   useEffect(() => { if (atBottom) bottom.current?.scrollIntoView({ block: 'nearest' }); }, [messages.length, latestRun?.events?.length, latestRun?.status, atBottom]);
@@ -89,7 +92,7 @@ export function ConversationView({ conversation, selectedRun, loading, busy, glo
     finally { submitting.current = false; }
   };
 
-  if (!conversation) return <div className="conversation-pane"><div className="chat-empty">{loading ? <><LoaderCircle className="spin" size={24} aria-hidden="true" /><p role="status">正在读取会话…</p></> : <><div className="empty-mark"><Terminal size={27} aria-hidden="true" /></div><h1>开始一段编码会话</h1><p>提出任务，审查改动，然后继续追加要求。</p><button className="button primary" onClick={onNew}><Plus size={17} aria-hidden="true" />新建对话</button><span className="empty-hint">无需模型密钥即可运行两轮机制演示</span></>}</div></div>;
+  if (!conversation) return <div className="conversation-pane"><div className="chat-empty">{loading ? <><LoaderCircle className="spin" size={24} aria-hidden="true" /><p role="status">正在读取会话…</p></> : <><div className="empty-mark"><Terminal size={27} aria-hidden="true" /></div><h1>开始一段编码会话</h1><p>提出任务，审查改动，然后继续追加要求。</p>{workspace && <p className="empty-workspace" title={workspace}>{workspace}</p>}<div className="empty-actions"><button className="button primary" disabled={disabled} onClick={onNew}><Plus size={17} aria-hidden="true" />新建对话</button><button className="button subtle" disabled={disabled} onClick={onOpenProject}>打开本地项目</button></div><span className="empty-hint">可直接在右侧文件页浏览源码，无需创建会话</span></>}</div></div>;
 
   return <div className="conversation-pane"><div className="chat-scroll" ref={scrollArea} onScroll={() => { const element = scrollArea.current; if (element) setAtBottom(element.scrollHeight - element.scrollTop - element.clientHeight < 80); }}>
     {!messages.length && <div className="chat-intro"><MessageSquare size={24} aria-hidden="true" /><h1>{conversation.mock ? '试一试完整编码流程' : '描述你想完成的任务'}</h1><p>{conversation.mock ? '第一轮修复金额计算，第二轮继续补充说明文档并验证。工具会修改会话的演示目录，运行测试前需要你审批。' : 'Agent 将读取当前工作区、修改代码并执行验收。你可以在完成后继续追加要求。'}</p>{conversation.mock && <button className="suggestion" onClick={() => { setContent('修复金额计算错误，并运行测试验证。'); textarea.current?.focus(); }}><FlaskConical size={16} aria-hidden="true" />修复金额计算错误，并运行测试验证<ChevronRight size={16} aria-hidden="true" /></button>}</div>}
@@ -109,7 +112,7 @@ export function ConversationView({ conversation, selectedRun, loading, busy, glo
   </div></div>;
 }
 
-export function NewConversationDialog({ busy, onClose, onCreate, onRestoreFocus }: { busy: boolean; onClose: () => void; onCreate: (input: NewConversationInput) => Promise<void>; onRestoreFocus: () => void }) {
+export function NewConversationDialog({ initialized, onInitialize, busy, onClose, onCreate, onRestoreFocus }: { initialized: boolean; onInitialize: () => void; busy: boolean; onClose: () => void; onCreate: (input: NewConversationInput) => Promise<void>; onRestoreFocus: () => void }) {
   const [mock, setMock] = useState(true);
   const [execution, setExecution] = useState<'local' | 'docker'>('docker');
   const [title, setTitle] = useState('');
@@ -135,5 +138,5 @@ export function NewConversationDialog({ busy, onClose, onCreate, onRestoreFocus 
     document.addEventListener('keydown', keydown);
     return () => { document.removeEventListener('keydown', keydown); onRestoreFocus(); };
   }, []);
-  return <div className="dialog-backdrop" onClick={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><div ref={dialog} className="new-dialog" role="dialog" aria-modal="true" aria-labelledby="new-dialog-title"><header><h2 id="new-dialog-title">新建对话</h2><button className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭新建对话"><X size={20} aria-hidden="true" /></button></header><form onSubmit={(event) => { event.preventDefault(); void onCreate({ title: title.trim() || undefined, mock, execution: mock ? 'local' : execution, verify: mock ? undefined : verify.trim() || undefined }); }}><label className="field-label" htmlFor="conversation-title">对话名称 <span>可选，首条任务会自动命名</span></label><input ref={firstInput} id="conversation-title" maxLength={120} value={title} disabled={busy} onChange={(event) => setTitle(event.target.value)} placeholder="例如：修复订单金额计算" /><fieldset className="mode-selection"><legend>执行模式</legend><label className={mock ? 'selected' : ''}><input type="radio" name="conversation-mode" checked={mock} disabled={busy} onChange={() => setMock(true)} /><span><strong>机制演示</strong><small>固定两轮脚本，不需要模型密钥</small></span></label><label className={!mock ? 'selected' : ''}><input type="radio" name="conversation-mode" checked={!mock} disabled={busy} onChange={() => setMock(false)} /><span><strong>真实模型</strong><small>使用当前工作区配置的模型</small></span></label></fieldset>{mock ? <p className="dialog-mode-note">演示在独立目录完成金额修复、追加说明与测试；流程包含人工审批，不统计为真实模型效果。</p> : <><label className="field-label" htmlFor="execution-mode">工具执行环境</label><select id="execution-mode" value={execution} disabled={busy} onChange={(event) => setExecution(event.target.value as 'local' | 'docker')}><option value="docker">Docker 隔离</option><option value="local">本机执行</option></select><label className="field-label" htmlFor="verifier">验收命令 <span>可选</span></label><input id="verifier" value={verify} disabled={busy} maxLength={4000} onChange={(event) => setVerify(event.target.value)} placeholder="例如：npm test" /><p className="dialog-mode-note">模式与验收命令在创建后固定。{execution === 'local' ? '本机模式直接在当前工作区执行命令。' : 'Docker 模式使用已配置的镜像与执行边界。'}</p></>}<footer><button className="button subtle" type="button" disabled={busy} onClick={onClose}>取消</button><button className="button primary" disabled={busy} type="submit">{busy ? '创建中…' : '创建对话'}</button></footer></form></div></div>;
+  return <div className="dialog-backdrop" onClick={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><div ref={dialog} className="new-dialog" role="dialog" aria-modal="true" aria-labelledby="new-dialog-title"><header><h2 id="new-dialog-title">新建对话</h2><button className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭新建对话"><X size={20} aria-hidden="true" /></button></header><form onSubmit={(event) => { event.preventDefault(); if (!mock && !initialized) return; void onCreate({ title: title.trim() || undefined, mock, execution: mock ? 'local' : execution, verify: mock ? undefined : verify.trim() || undefined }); }}><label className="field-label" htmlFor="conversation-title">对话名称 <span>可选，首条任务会自动命名</span></label><input ref={firstInput} id="conversation-title" maxLength={120} value={title} disabled={busy} onChange={(event) => setTitle(event.target.value)} placeholder="例如：修复订单金额计算" /><fieldset className="mode-selection"><legend>执行模式</legend><label className={mock ? 'selected' : ''}><input type="radio" name="conversation-mode" checked={mock} disabled={busy} onChange={() => setMock(true)} /><span><strong>机制演示</strong><small>固定两轮脚本，不需要模型密钥</small></span></label><label className={!mock ? 'selected' : ''}><input type="radio" name="conversation-mode" checked={!mock} disabled={busy} onChange={() => setMock(false)} /><span><strong>真实模型</strong><small>使用当前工作区配置的模型</small></span></label></fieldset>{mock ? <p className="dialog-mode-note">演示在独立目录完成金额修复、追加说明与测试；流程包含人工审批，不统计为真实模型效果。</p> : <>{!initialized && <div className="project-notice"><p>当前项目尚未初始化。请先初始化 Harness 配置，再在目标项目配置模型提供商、模型名称与凭据。</p><button className="text-button" type="button" disabled={busy} onClick={onInitialize}>打开项目并初始化配置</button></div>}<label className="field-label" htmlFor="execution-mode">工具执行环境</label><select id="execution-mode" value={execution} disabled={busy} onChange={(event) => setExecution(event.target.value as 'local' | 'docker')}><option value="docker">Docker 隔离</option><option value="local">本机执行</option></select><label className="field-label" htmlFor="verifier">验收命令 <span>可选</span></label><input id="verifier" value={verify} disabled={busy} maxLength={4000} onChange={(event) => setVerify(event.target.value)} placeholder="例如：npm test" /><p className="dialog-mode-note">模式与验收命令在创建后固定。{execution === 'local' ? '本机模式直接在当前工作区执行命令。' : 'Docker 模式使用已配置的镜像与执行边界。'}</p></>}<footer><button className="button subtle" type="button" disabled={busy} onClick={onClose}>取消</button><button className="button primary" disabled={busy || !mock && !initialized} type="submit">{busy ? '创建中…' : '创建对话'}</button></footer></form></div></div>;
 }

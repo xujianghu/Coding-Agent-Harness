@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from 'fs';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { createRunManager, WebApiError } from './manager';
 import { listWorkspaceFiles, readWorkspaceFile } from './files';
+import { createProjectHost } from './projects';
 
 export interface WebServerOptions { workspace: string; port?: number; host?: string; configPath?: string; staticDir?: string }
 
@@ -66,11 +67,11 @@ export async function startWebServer(options: WebServerOptions): Promise<{ url: 
   if (options.host !== undefined && options.host !== '127.0.0.1') throw new WebApiError('工作台只能监听 127.0.0.1');
   const requestedPort = options.port ?? 4173;
   if (!Number.isSafeInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) throw new WebApiError('端口必须是 0 到 65535 的整数');
-  const manager = createRunManager(options);
   const streams = new Set<ServerResponse>();
+  const projects = createProjectHost(options, () => { for (const stream of streams) stream.end(); });
   const staticDir = options.staticDir ?? resolve(__dirname, '../web-ui');
   let port = requestedPort;
-  function streamRun(request: IncomingMessage, response: ServerResponse, id: string): void {
+  function streamRun(request: IncomingMessage, response: ServerResponse, id: string, manager: ReturnType<typeof createRunManager>): void {
     manager.getRun(id);
     if (streams.size >= 64) throw new WebApiError('实时连接数量超过上限，请关闭其他页面', 429, 'TOO_MANY_STREAMS');
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
@@ -116,16 +117,48 @@ export async function startWebServer(options: WebServerOptions): Promise<{ url: 
       const path = url.pathname;
       const method = request.method;
       if (path.startsWith('/api/')) {
-        if (method === 'GET' && path === '/api/workspace') return reply(response, 200, manager.getWorkspace());
+        if (method === 'GET' && path === '/api/workspace') return reply(response, 200, projects.manager.getWorkspace());
+        if (method === 'GET' && path === '/api/projects') {
+          if (url.searchParams.size) throw new WebApiError('最近项目接口不接受查询参数');
+          return reply(response, 200, projects.list());
+        }
+        const projectHeader = request.headers['x-harness-project'];
+        if (projectHeader !== undefined && (typeof projectHeader !== 'string' || !/^[a-f0-9]{32}$/.test(projectHeader))) throw new WebApiError('项目标识无效', 409, 'PROJECT_CHANGED');
+        let expectedProject = projectHeader;
+        if (method === 'GET' && path === '/api/projects/directories') {
+          if ([...url.searchParams.keys()].some(key => key !== 'path') || url.searchParams.getAll('path').length > 1) throw new WebApiError('包含未知或重复目录参数');
+          if (expectedProject) projects.assertContext(expectedProject);
+          return reply(response, 200, projects.browse(url.searchParams.get('path') ?? undefined));
+        }
+        const eventsRoute = path.match(/^\/api\/runs\/([a-zA-Z0-9_-]{1,100})\/events$/);
+        if (method === 'GET' && eventsRoute) {
+          if ([...url.searchParams.keys()].some(key => key !== 'projectId') || url.searchParams.getAll('projectId').length > 1) throw new WebApiError('包含未知或重复实时连接参数');
+          const queryProject = url.searchParams.get('projectId');
+          if (queryProject !== null) {
+            if (!/^[a-f0-9]{32}$/.test(queryProject) || (expectedProject && expectedProject !== queryProject)) throw new WebApiError('实时连接项目标识不匹配', 409, 'PROJECT_CHANGED');
+            expectedProject = queryProject;
+          }
+        }
+        let manager = projects.assertContext(expectedProject);
+        const readInput = async () => {
+          const input = await jsonBody(request);
+          // 等待请求体时其他标签页可能完成项目切换，必须再次绑定当前项目。
+          manager = projects.assertContext(expectedProject);
+          return input;
+        };
+        if (method === 'POST' && path === '/api/projects/open') {
+          if (url.searchParams.size) throw new WebApiError('打开项目接口不接受查询参数');
+          return reply(response, 200, projects.open(await readInput(), expectedProject));
+        }
         if (method === 'GET' && path === '/api/runs') return reply(response, 200, { runs: manager.list() });
         if (method === 'GET' && path === '/api/evaluations') return reply(response, 200, { reports: manager.evaluations() });
         if (method === 'GET' && path === '/api/conversations') return reply(response, 200, { conversations: manager.listConversations() });
-        if (method === 'POST' && path === '/api/conversations') return reply(response, 201, manager.createConversation(await jsonBody(request)));
+        if (method === 'POST' && path === '/api/conversations') { const input = await readInput(); return reply(response, 201, manager.createConversation(input)); }
         const conversationRoute = path.match(/^\/api\/conversations\/([a-zA-Z0-9_-]{1,100})(?:\/(messages))?$/);
         if (conversationRoute) {
           const [, id, operation] = conversationRoute;
           if (method === 'GET' && !operation) return reply(response, 200, manager.getConversation(id));
-          if (method === 'POST' && operation === 'messages') return reply(response, 201, manager.sendMessage(id, await jsonBody(request)));
+          if (method === 'POST' && operation === 'messages') { const input = await readInput(); return reply(response, 201, manager.sendMessage(id, input)); }
         }
         if (method === 'GET' && (path === '/api/files' || path === '/api/file')) {
           if ([...url.searchParams.keys()].some(key => !['conversationId', 'path'].includes(key))) throw new WebApiError('包含未知文件参数');
@@ -133,15 +166,14 @@ export async function startWebServer(options: WebServerOptions): Promise<{ url: 
           const filePath = url.searchParams.get('path') ?? '';
           return reply(response, 200, path === '/api/files' ? listWorkspaceFiles(fileWorkspace, filePath) : readWorkspaceFile(fileWorkspace, filePath));
         }
-        const eventsRoute = path.match(/^\/api\/runs\/([a-zA-Z0-9_-]{1,100})\/events$/);
-        if (method === 'GET' && eventsRoute) return streamRun(request, response, eventsRoute[1]);
-        if (method === 'POST' && path === '/api/runs') return reply(response, 201, manager.start(await jsonBody(request)));
+        if (method === 'GET' && eventsRoute) return streamRun(request, response, eventsRoute[1], manager);
+        if (method === 'POST' && path === '/api/runs') { const input = await readInput(); return reply(response, 201, manager.start(input)); }
         const route = path.match(/^\/api\/runs\/([a-zA-Z0-9_-]{1,100})(?:\/(cancel|approve|resume))?$/);
         if (route) {
           const [, id, operation] = route;
           if (method === 'GET' && !operation) return reply(response, 200, manager.getRun(id));
           if (method === 'POST' && operation) {
-            const input = await jsonBody(request);
+            const input = await readInput();
             if (operation === 'cancel' || operation === 'resume') {
               if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length) throw new WebApiError('此操作的请求体必须是空对象');
               return reply(response, operation === 'resume' ? 202 : 200, operation === 'resume' ? manager.resume(id) : await manager.cancel(id));
@@ -170,7 +202,7 @@ export async function startWebServer(options: WebServerOptions): Promise<{ url: 
   let closing: Promise<void> | undefined;
   return { url: `http://127.0.0.1:${port}`, close() {
     return closing ??= (async () => {
-      await manager.close();
+      await projects.close();
       for (const stream of streams) stream.end();
       await new Promise<void>((resolveClosed, reject) => { server.close(error => error ? reject(error) : resolveClosed()); server.closeAllConnections(); });
     })();

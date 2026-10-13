@@ -10,7 +10,7 @@
 
 ![会话工作台：连续对话、执行审批、文件浏览与逐轮 Diff](docs/ui-preview.jpg)
 
-文档更新：2026-10-11。
+文档更新：2026-10-13。
 
 ## 核心能力
 
@@ -22,6 +22,7 @@
 | 隔离执行 | 命令默认使用 Docker，限制网络、权限、资源与输出；支持超时和取消清理 |
 | 验收与修复 | `completed` 与 `verified` 分离；配置验收后，失败反馈进入下一轮修复 |
 | 预算与恢复 | 轮次、时间、Token 预算；完整工具消息组成组裁剪；检查点、执行轨迹与安全恢复 |
+| 本地项目 | 网页输入绝对路径、浏览本机目录、打开与切换最近项目；按项目读取会话、运行和评测报告 |
 | 会话工作台 | 连续追加需求、执行状态、审批、取消与恢复；只读文件浏览、逐轮 Diff、历史与评测报告 |
 | 对照评测 | 10 个冻结修复任务，支持 `baseline`、`full`、`no-feedback`；独立隐藏验收与逐次结果记录 |
 
@@ -34,7 +35,6 @@ git clone --branch codex/agent-harness-upgrade https://github.com/xujianghu/Codi
 cd Coding-Agent-Harness
 npm ci
 npm run build
-node dist/cli/index.js init
 npm run web
 ```
 
@@ -46,6 +46,16 @@ npm run web
 4. 继续发送“为金额计算补充使用说明”，查看第二轮记录；刷新页面检查会话持久化。
 
 演示会真实操作独立目录中的文件并运行固定测试，模型响应来自预设脚本。它验证执行机制，**不代表能够离线理解任意任务，也不衡量真实模型编码能力**。完整步骤见 [快速开始](docs/getting-started.md) 和 [项目演示](docs/project-showcase.md)。
+
+## 打开本地代码项目
+
+点击左侧项目名称，打开“打开本地项目”对话框。可以输入代码目录的绝对路径、逐级浏览本机目录，或从“最近项目”切换；例如 `D:\projects\my-app`。选择的是运行 Harness 服务这台电脑上的目录，源码文件直接从该目录读取。
+
+![网页打开本地项目：目录浏览、初始化选项与最近项目](docs/local-projects.png)
+
+未初始化的项目也能只读浏览源码、创建机制演示会话。默认打开不会生成配置或调用模型；需要真实任务时，勾选“初始化 Harness 配置（仅创建缺失文件）”，再配置目标项目的模型与凭据。会话和运行按项目保存，执行中或等待审批时需要先完成或取消任务再切换。
+
+完整操作与常见问题见 [本地项目使用步骤](docs/getting-started.md#在工作台使用自己的项目)，页面验收记录见 [工作台功能验收](docs/workbench-verification.md)。
 
 ## 执行真实任务
 
@@ -101,7 +111,7 @@ npm run eval:smoke
 npm run test:package
 ```
 
-升级实现 [`9615b77`](https://github.com/xujianghu/Coding-Agent-Harness/commit/9615b7752d278b0c0ac51e6966a1f1f763c1b01c) 的工程验证记录：**351 个测试通过、10 个跳过；离线机制自检 30/30 通过**（10 个任务 × 3 种模式）。这是工程测试与固定脚本自检结果，**仓库尚未提供真实模型成功率数据**；当前任务集也不覆盖大型仓库或 Java 工程。
+本地项目与工作台升级的工程验证：**364 个测试通过、10 个跳过**，构建、安装包与实际浏览器交互验收通过，见 [验收记录](docs/workbench-verification.md)。此前 [`9615b77`](https://github.com/xujianghu/Coding-Agent-Harness/commit/9615b7752d278b0c0ac51e6966a1f1f763c1b01c) 的离线机制自检为 **30/30 通过**（10 个任务 × 3 种模式）。这些是工程测试与固定脚本结果，**仓库尚未提供真实模型成功率数据**；当前任务集也不覆盖大型仓库或 Java 工程。
 
 真实评测在配置和凭据准备完成后执行，会产生 API 费用，并强制使用 Docker：
 
@@ -113,8 +123,8 @@ node dist/eval/cli.js --config .harness/config.yaml --mode all --repeat 3
 
 ## 当前边界
 
-- 工作台面向本机单用户，只监听回环地址；一次服务固定一个工作区，同时执行一个 run，不提供多用户或公网部署能力。
-- 不同真实会话共享启动工作区，尚未实现每会话 worktree；文件面板只读，Diff 为有界预览。
+- 工作台面向本机单用户，只监听回环地址；可以切换本地项目，同一服务一次执行一个 run，不提供多用户或公网部署能力。
+- 同一项目内不同真实会话共享代码目录，尚未实现每会话 worktree；文件面板只读，Diff 为有界预览。
 - SSE 推送执行快照，尚未实现模型逐 Token 输出或执行中追加指令。
 - Docker 不可用时不会自动退回 `local`；显式 `local` 执行拥有宿主用户权限，不提供容器隔离。
 - 目前没有产品内置多 Agent 调度、MCP 扩展、语义仓库索引或 Java 评测集。
@@ -130,7 +140,7 @@ src/
   tools/         文件、搜索、补丁与命令执行器
   governance/    护栏、审批、工作区边界与审计
   cli/           任务入口、检查点与执行轨迹
-  web/           本地工作台 API、会话与运行管理
+  web/           本地项目选择、工作台 API、会话与运行管理
   eval/          评测运行、独立评分与报告
 frontend/        React / TypeScript / Vite 工作台
 eval/            冻结任务、公开测试、隐藏验收与 mock 解法
@@ -151,6 +161,7 @@ docs/            使用、设计、开发与展示文档
 | [架构说明](docs/architecture.md) | 工具协议、会话、验收、恢复与隔离边界 |
 | [评测指南](eval/README.md) | 任务集、独立评分、对照实验与报告 |
 | [开发与验证](docs/development.md) | 本地开发、测试、构建与 CI |
+| [工作台功能验收](docs/workbench-verification.md) | 本地项目与网页功能的检查结果及验证边界 |
 | [参与贡献](CONTRIBUTING.md) | 问题反馈、修改提交与文档约定 |
 | [项目演示与简历表达](docs/project-showcase.md) | 五分钟演示、实现贡献与证据要求 |
 | [改进路线图](docs/roadmap.md) | 实施优先级、交付目标与验证方式 |

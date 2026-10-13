@@ -8,7 +8,7 @@ interface Props {
   onCancel: () => void;
   onApprove: (approvalId: string, approved: boolean) => void;
   onResume: () => void;
-  onRestart: (task: string) => void;
+  onRestart: () => void;
   loading?: boolean;
 }
 
@@ -93,7 +93,7 @@ export function RunDetails({ run, busy, onCancel, onApprove, onResume, onRestart
       {run && <span className={`status-pill status-${run.status}`}>{active && run.status !== 'awaiting_approval' ? <LoaderCircle size={12} className="spin" aria-hidden="true" /> : run.status === 'completed' ? <CircleCheck size={12} aria-hidden="true" /> : <Circle size={8} fill="currentColor" aria-hidden="true" />}{statusText[run.status]}</span>}
     </div>
     {!run ? loading ? <p className="loading-text" role="status">正在读取执行轨迹…</p> : <div className="empty-timeline"><div className="empty-icon"><ListChecks size={28} strokeWidth={1.5} aria-hidden="true" /></div><h3>每一步执行，都可以追踪</h3><p>提交任务后，这里会显示模型响应、<br />工具执行、策略检查与验收结果。</p><div className="empty-flow"><span>规划</span><i /><span>执行</span><i /><span>验收</span></div></div> : <>
-      <div className="run-task"><p>{run.task}</p><div className="run-actions">{active && <button className="button subtle danger" onClick={onCancel} disabled={busy}><Square size={13} aria-hidden="true" />{busy ? '正在处理…' : '停止执行'}</button>}{['error', 'stopped', 'cancelled'].includes(run.status) && <>{run.resumable && <button className="button subtle" onClick={onResume} disabled={busy}><PlayIcon />恢复会话</button>}<button className="text-button" onClick={() => onRestart(run.task)} disabled={busy}>重新填写</button></>}</div></div>
+      <div className="run-task"><p>{run.task}</p><div className="run-actions">{active && <button className="button subtle danger" onClick={onCancel} disabled={busy}><Square size={13} aria-hidden="true" />{busy ? '正在处理…' : '停止执行'}</button>}{['error', 'stopped', 'cancelled'].includes(run.status) && <>{run.resumable && <button className="button subtle" onClick={onResume} disabled={busy}><PlayIcon />恢复会话</button>}<button className="text-button" onClick={onRestart} disabled={busy}>新建对话</button></>}</div></div>
       <div className="run-steps" aria-label="执行阶段"><span className="step done"><Check size={12} aria-hidden="true" />任务准备</span><span className={`step ${events.some((event) => event.type === 'tool_result') ? 'done' : ''}`}><Terminal size={12} aria-hidden="true" />工具执行</span><span className={`step ${run.verified ? 'done' : ''}`}><ShieldCheck size={12} aria-hidden="true" />结果验收</span></div>
       {approval && <div className="approval-panel" aria-labelledby="approval-title"><div className="approval-heading"><ShieldCheck size={18} aria-hidden="true" /><h3 id="approval-title">这一步需要你的审批</h3></div><p>{approval.reason ?? approval.reasons?.join('；') ?? '确认操作后，Agent 将继续执行。'}</p><code>{approval.action.type} · {Object.entries(approval.action.params).map(([key, value]) => `${key}: ${String(value)}`).join('\n')}</code><div className="approval-actions"><button className="button subtle" disabled={busy} onClick={() => onApprove(approval.approvalId ?? approval.id ?? '', false)}><X size={14} aria-hidden="true" />拒绝</button><button className="button amber" disabled={busy} onClick={() => onApprove(approval.approvalId ?? approval.id ?? '', true)}><Check size={14} aria-hidden="true" />批准本次</button></div></div>}
       <div className="timeline-toolbar"><span>{events.length} 条事件</span><label className="raw-toggle"><input type="checkbox" checked={showRaw} onChange={(event) => setShowRaw(event.target.checked)} />显示原始详情</label></div>

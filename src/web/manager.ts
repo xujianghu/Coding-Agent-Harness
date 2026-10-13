@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'fs';
 import { isAbsolute, join, resolve } from 'path';
-import { loadConfig, validateConfig, DefaultConfig } from '../config/loader';
+import { validateConfig, DefaultConfig } from '../config/loader';
+import { workspaceConfiguration } from '../config/initialize';
 import { createAgentLoop } from '../core/loop';
 import { validateContextMessages } from '../core/conversation-context';
 import { throwIfAborted } from '../core/runtime';
@@ -73,7 +74,7 @@ function validInput(input: unknown): asserts input is WebRunInput {
   if (record.execution !== undefined && !['local', 'docker'].includes(String(record.execution))) throw new WebApiError('执行模式无效');
 }
 
-export function createRunManager(options: { workspace: string; configPath?: string }) {
+export function createRunManager(options: { workspace: string; configPath?: string; projectId?: string }) {
   const workspace = realpathSync(resolve(options.workspace));
   const configPath = options.configPath ? (isAbsolute(options.configPath) ? options.configPath : resolve(workspace, options.configPath)) : join(workspace, '.harness', 'config.yaml');
   const runs = new Map<string, ManagedRun>();
@@ -84,19 +85,16 @@ export function createRunManager(options: { workspace: string; configPath?: stri
   const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
   function services(execution?: 'local' | 'docker') {
-    const config = loadConfig(configPath);
+    const { config, rules, rulesPath } = workspaceConfiguration(workspace, configPath);
     if (execution) config.execution = { ...config.execution, mode: execution };
     validateConfig(config);
-    const rulesPath = isAbsolute(config.governance.rulesFile) ? config.governance.rulesFile : join(workspace, config.governance.rulesFile);
     if (!existsSync(rulesPath)) throw new WebApiError('缺少护栏文件，请先在工作区运行 harness init', 409, 'WORKSPACE_NOT_INITIALIZED');
-    return { config, rules: loadGuardrailRules(rulesPath), rulesPath };
+    return { config, rules, rulesPath };
   }
 
   function getWorkspace(): WebWorkspace {
-    const config = loadConfig(configPath);
-    const rulesPath = isAbsolute(config.governance.rulesFile) ? config.governance.rulesFile : join(workspace, config.governance.rulesFile);
-    const rules = existsSync(rulesPath) ? loadGuardrailRules(rulesPath) : [];
-    return { workspace, config: { llm: { provider: config.llm.provider, model: config.llm.model, maxTokens: config.llm.maxTokens, temperature: config.llm.temperature },
+    const { config, rules, initialized } = workspaceConfiguration(workspace, configPath);
+    return { workspace, projectId: options.projectId, initialized, config: { llm: { provider: config.llm.provider, model: config.llm.model, maxTokens: config.llm.maxTokens, temperature: config.llm.temperature },
       agent: config.agent, memory: config.memory, governance: { rulesCount: rules.length, ...config.governance.sandbox } },
       execution: config.execution, tools: createWorkspaceTools(config, workspace).map(({ name, description }) => ({ name, description })) };
   }
@@ -513,6 +511,7 @@ export function createRunManager(options: { workspace: string; configPath?: stri
 
   return {
     workspace, getWorkspace, getRun, start, resume, getConversation, createConversation, sendMessage,
+    hasActiveRun() { return active !== undefined; },
     listConversations() { hydrateConversations(); return [...conversations.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100).map(conversationView); },
     fileWorkspace(conversationId?: string) { return conversationId ? conversationById(conversationId).workspace : workspace; },
     subscribe(id: string, listener: (run: WebRun) => void): () => void {

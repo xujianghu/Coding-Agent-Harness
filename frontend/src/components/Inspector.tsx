@@ -1,6 +1,6 @@
 import { ArrowLeft, ChevronRight, FileCode2, Files, Folder, GitCompareArrows, LoaderCircle, PanelRightClose, Terminal } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { request, type FileContent, type FileListing, type Run } from '../api';
+import { getProjectGeneration, request, staleRequest, type FileContent, type FileListing, type Run } from '../api';
 import { RunDetails, RunStats } from './RunDetails';
 
 type InspectorTab = 'changes' | 'files' | 'run';
@@ -32,30 +32,45 @@ export function DiffView({ run }: { run: Run | null }) {
   })}</div>;
 }
 
-function FileBrowser({ conversationId, runId }: { conversationId: string | null; runId?: string }) {
+function FileBrowser({ projectId, conversationId, runId }: { projectId: string | null; conversationId: string | null; runId?: string }) {
   const [path, setPath] = useState('');
   const [filePath, setFilePath] = useState<string | null>(null);
   const [listing, setListing] = useState<FileListing | null>(null);
   const [file, setFile] = useState<FileContent | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  useEffect(() => { setPath(''); setFilePath(null); setListing(null); setFile(null); setError(''); }, [conversationId]);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const rootButton = useRef<HTMLButtonElement>(null);
+  const codeArea = useRef<HTMLDivElement>(null);
+  const pendingFileFocus = useRef<string | null>(null);
   useEffect(() => {
-    if (!conversationId) return;
+    if (!projectId) { setLoading(false); return; }
     const controller = new AbortController();
-    setLoading(true); setError('');
-    const query = new URLSearchParams({ conversationId, path: filePath ?? path });
-    const promise = filePath === null ? request<FileListing>(`/files?${query}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setListing(data); }) : request<FileContent>(`/file?${query}`, { signal: controller.signal }).then((data) => { if (!controller.signal.aborted) setFile(data); });
-    promise.catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '无法读取文件。'); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    const generation = getProjectGeneration();
+    if (filePath && document.activeElement === codeArea.current) { pendingFileFocus.current = filePath; rootButton.current?.focus(); }
+    setLoading(true); setError(''); setFile(null);
+    if (filePath === null) setListing(null);
+    const query = new URLSearchParams({ path: filePath ?? path });
+    if (conversationId) query.set('conversationId', conversationId);
+    const current = () => !controller.signal.aborted && generation === getProjectGeneration();
+    const promise = filePath === null ? request<FileListing>(`/files?${query}`, { signal: controller.signal }).then((data) => { if (current()) setListing(data); }) : request<FileContent>(`/file?${query}`, { signal: controller.signal }).then((data) => { if (current()) setFile(data); });
+    promise.catch((cause: unknown) => { if (current() && !staleRequest(cause)) { pendingFileFocus.current = null; setError(cause instanceof Error ? cause.message : '无法读取文件。'); } }).finally(() => { if (current()) setLoading(false); });
     return () => controller.abort();
-  }, [conversationId, path, filePath, runId]);
-  if (!conversationId) return <div className="inspector-empty"><Files size={25} aria-hidden="true" /><p>选择一段会话后浏览它的工作目录</p></div>;
+  }, [projectId, conversationId, path, filePath, runId, reloadVersion]);
+  useEffect(() => {
+    if (loading || !file || pendingFileFocus.current !== filePath) return;
+    pendingFileFocus.current = null;
+    if (document.activeElement === rootButton.current) codeArea.current?.focus();
+  }, [file, filePath, loading]);
+  const directory = (value: string) => { rootButton.current?.focus(); pendingFileFocus.current = null; setPath(value); setFilePath(null); setFile(null); setListing(null); setError(''); setReloadVersion((current) => current + 1); };
+  const openFile = (value: string) => { rootButton.current?.focus(); pendingFileFocus.current = value; setFile(null); setError(''); setFilePath(value); };
+  if (!projectId) return <div className="inspector-empty"><Files size={25} aria-hidden="true" /><p>读取当前项目后即可浏览本地源码</p></div>;
   const segments = path.split('/').filter(Boolean);
-  return <div className="file-browser"><div className="file-breadcrumb"><button onClick={() => { setPath(''); setFilePath(null); }} aria-label="返回工作区根目录"><Folder size={15} aria-hidden="true" />工作区</button>{segments.map((segment, index) => <span key={index}><ChevronRight size={12} aria-hidden="true" /><button onClick={() => { setPath(segments.slice(0, index + 1).join('/')); setFilePath(null); }}>{segment}</button></span>)}</div><p className="inspector-caption">只读文件浏览 · 敏感文件与越界路径受保护</p>{error && <p className="file-error" role="alert">{error}</p>}{loading ? <p className="loading-text" role="status"><LoaderCircle size={18} className="spin" aria-hidden="true" />读取中…</p> : filePath && file ? <><button className="file-back" onClick={() => setFilePath(null)}><ArrowLeft size={15} aria-hidden="true" />返回目录</button><div className="code-file-title"><FileCode2 size={16} aria-hidden="true" /><strong>{file.path}</strong><span>{file.size.toLocaleString('zh-CN')} 字节</span></div><div className="code-view" tabIndex={0} aria-label={`${file.path} 文件内容`}><pre>{file.content.split('\n').map((line, index) => <span className="code-line" key={index}><span className="line-number">{index + 1}</span><span>{line || ' '}</span>{'\n'}</span>)}</pre></div></> : listing && <div className="file-list">{path && <button className="file-entry" onClick={() => { setPath(segments.slice(0, -1).join('/')); setFilePath(null); }}><ArrowLeft size={16} aria-hidden="true" /><span>返回上一级</span></button>}{listing.entries.map((entry) => <button className="file-entry" key={entry.path} onClick={() => { if (entry.kind === 'directory') { setPath(entry.path); setFilePath(null); } else { setFile(null); setFilePath(entry.path); } }}>{entry.kind === 'directory' ? <Folder size={17} aria-hidden="true" /> : <FileCode2 size={17} aria-hidden="true" />}<span>{entry.name}</span>{entry.kind === 'directory' ? <ChevronRight size={13} aria-hidden="true" /> : <small>{entry.size === undefined ? '' : entry.size < 1024 ? `${entry.size} B` : `${(entry.size / 1024).toFixed(1)} KB`}</small>}</button>)}{!listing.entries.length && <p className="inspector-caption">这个目录中没有可展示的文件</p>}{listing.truncated && <p className="inspector-caption">目录较大，仅展示部分文件</p>}</div>}</div>;
+  return <div className="file-browser"><div className="file-breadcrumb"><button ref={rootButton} onClick={() => directory('')} aria-label="返回工作区根目录"><Folder size={15} aria-hidden="true" />工作区</button>{segments.map((segment, index) => <span key={index}><ChevronRight size={12} aria-hidden="true" /><button onClick={() => directory(segments.slice(0, index + 1).join('/'))}>{segment}</button></span>)}</div><p className="inspector-caption">只读文件浏览 · 敏感文件与越界路径受保护</p>{filePath && <button className="file-back" onClick={() => directory(path)}><ArrowLeft size={15} aria-hidden="true" />返回目录</button>}{error && <p className="file-error" role="alert">{error}</p>}{loading ? <p className="loading-text" role="status"><LoaderCircle size={18} className="spin" aria-hidden="true" />读取中…</p> : filePath ? file && <><div className="code-file-title"><FileCode2 size={16} aria-hidden="true" /><strong>{file.path}</strong><span>{file.size.toLocaleString('zh-CN')} 字节</span></div><div ref={codeArea} className="code-view" tabIndex={0} aria-label={`${file.path} 文件内容`}><pre>{file.content.split('\n').map((line, index) => <span className="code-line" key={index}><span className="line-number">{index + 1}</span><span>{line || ' '}</span>{'\n'}</span>)}</pre></div></> : listing && <div className="file-list">{path && <button className="file-entry" onClick={() => directory(segments.slice(0, -1).join('/'))}><ArrowLeft size={16} aria-hidden="true" /><span>返回上一级</span></button>}{listing.entries.map((entry) => <button className="file-entry" key={entry.path} onClick={() => { if (entry.kind === 'directory') directory(entry.path); else openFile(entry.path); }}>{entry.kind === 'directory' ? <Folder size={17} aria-hidden="true" /> : <FileCode2 size={17} aria-hidden="true" />}<span>{entry.name}</span>{entry.kind === 'directory' ? <ChevronRight size={13} aria-hidden="true" /> : <small>{entry.size === undefined ? '' : entry.size < 1024 ? `${entry.size} B` : `${(entry.size / 1024).toFixed(1)} KB`}</small>}</button>)}{!listing.entries.length && <p className="inspector-caption">这个目录中没有可展示的文件</p>}{listing.truncated && <p className="inspector-caption">目录较大，仅展示部分文件</p>}</div>}</div>;
 }
 
-export function Inspector({ conversationId, run, busy, onClose, onCancel, onResume, onApprove, onRestart }: { conversationId: string | null; run: Run | null; busy: boolean; onClose: () => void; onCancel: () => void; onResume: () => void; onApprove: (id: string, approved: boolean) => void; onRestart: () => void }) {
-  const [tab, setTab] = useState<InspectorTab>('changes');
+export function Inspector({ projectId, workspace, demo, conversationId, run, busy, onClose, onCancel, onResume, onApprove, onRestart }: { projectId: string | null; workspace?: string; demo: boolean; conversationId: string | null; run: Run | null; busy: boolean; onClose: () => void; onCancel: () => void; onResume: () => void; onApprove: (id: string, approved: boolean) => void; onRestart: () => void }) {
+  const [tab, setTab] = useState<InspectorTab>(conversationId || run ? 'changes' : 'files');
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
-  return <aside className="inspector" aria-label="工作区查看器"><header className="inspector-header"><div role="tablist" aria-label="查看内容">{tabs.map(({ id, title, icon: Icon }, index) => <button ref={(element) => { buttons.current[index] = element; }} key={id} id={`inspector-tab-${id}`} role="tab" aria-selected={tab === id} aria-controls={`inspector-panel-${id}`} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'selected' : ''} onClick={() => setTab(id)} onKeyDown={(event) => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length; setTab(tabs[next].id); buttons.current[next]?.focus(); }}><Icon size={15} aria-hidden="true" /><span>{title}</span></button>)}</div><button className="icon-button" aria-label="收起查看器" onClick={onClose}><PanelRightClose size={18} aria-hidden="true" /></button></header><div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={`inspector-tab-${tab}`}>{tab === 'changes' && <DiffView run={run} />}{tab === 'files' && <FileBrowser key={conversationId} conversationId={conversationId} runId={run?.id + ':' + run?.status} />}{tab === 'run' && <><RunStats run={run} /><RunDetails run={run} busy={busy} onCancel={onCancel} onApprove={onApprove} onResume={onResume} onRestart={onRestart} /></>}</div></aside>;
+  return <aside className="inspector" aria-label="工作区查看器"><header className="inspector-header"><div role="tablist" aria-label="查看内容">{tabs.map(({ id, title, icon: Icon }, index) => <button ref={(element) => { buttons.current[index] = element; }} key={id} id={`inspector-tab-${id}`} role="tab" aria-selected={tab === id} aria-controls={`inspector-panel-${id}`} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'selected' : ''} onClick={() => setTab(id)} onKeyDown={(event) => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length; setTab(tabs[next].id); buttons.current[next]?.focus(); }}><Icon size={15} aria-hidden="true" /><span>{title}</span></button>)}</div><button className="icon-button" aria-label="收起查看器" onClick={onClose}><PanelRightClose size={18} aria-hidden="true" /></button></header><p className="inspector-workspace" title={workspace}>{demo ? '独立演示目录（不修改项目源码）' : '本地项目'} · {workspace ?? '正在读取…'}</p><div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={`inspector-tab-${tab}`}>{tab === 'changes' && <DiffView run={run} />}{tab === 'files' && <FileBrowser key={projectId + ':' + conversationId} projectId={projectId} conversationId={conversationId} runId={run?.id + ':' + run?.status} />}{tab === 'run' && <><RunStats run={run} /><RunDetails run={run} busy={busy} onCancel={onCancel} onApprove={onApprove} onResume={onResume} onRestart={onRestart} /></>}</div></aside>;
 }

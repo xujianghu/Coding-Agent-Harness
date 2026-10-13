@@ -2,6 +2,7 @@
 
 import { Command } from 'commander';
 import { loadConfig, validateConfig } from '../config/loader';
+import { initializeWorkspace } from '../config/initialize';
 import { createToolRegistry } from '../tools/registry';
 import { createGuardrailEngine } from '../governance/guardrail';
 import { createGuardrailWatcher } from '../governance/watcher';
@@ -18,7 +19,7 @@ import { createCredentialManager } from '../credential/manager';
 import { AgentConfig, LLMResponse } from '../core/types';
 import * as readline from 'readline';
 import * as readlinePromises from 'readline/promises';
-import { existsSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync } from 'fs';
 import { join, resolve, isAbsolute } from 'path';
 import { randomUUID } from 'crypto';
 import { createWorkspaceTools } from '../tools/workspace';
@@ -63,64 +64,6 @@ function hiddenPrompt(query: string): Promise<string> {
     stdin.once('end', onEnd);
   });
 }
-
-const DEFAULT_CONFIG_YAML = `llm:
-  provider: openai
-  model: gpt-4o
-  maxTokens: 4096
-  temperature: 0.1
-
-agent:
-  maxTurns: 50
-  timeout: 300000
-
-governance:
-  rulesFile: .harness/guardrails.yaml
-  sandbox:
-    allowedPaths:
-      - ./
-    allowedCommands:
-      - npm
-      - node
-      - npx
-      - tsc
-      - eslint
-      - vitest
-      - jest
-      - git
-
-memory:
-  storagePath: .harness/memory/
-  maxConversationTurns: 20
-`;
-
-const DEFAULT_GUARDRAILS_YAML = `rules:
-  - name: no-destructive-commands
-    pattern: "rm -rf|rm -r|del /f|format"
-    severity: critical
-    action: block
-    type: command
-  - name: no-env-file-access
-    pattern: "\\\\.env"
-    severity: high
-    action: block
-    type: file
-  - name: no-system-directory-write
-    pattern: "^/(etc|sys|proc|dev)/"
-    severity: high
-    action: block
-    type: file
-  - name: no-package-lock-write
-    pattern: "package-lock\\\\.json"
-    severity: medium
-    action: approve
-    type: file
-  - name: no-git-config-write
-    pattern: "\\\\.git/config"
-    severity: critical
-    action: block
-    type: file
-`;
 
 const program = new Command();
 
@@ -476,33 +419,8 @@ program
   .description('Initialize a new harness project')
   .option('-w, --workspace <path>', 'Workspace path', process.cwd())
   .action(async (options: { workspace: string }) => {
-    const workspace = options.workspace;
-    const harnessDir = join(workspace, '.harness');
-
-    if (!existsSync(harnessDir)) {
-      mkdirSync(harnessDir, { recursive: true });
-    }
-
-    const configPath = join(harnessDir, 'config.yaml');
-    if (!existsSync(configPath)) {
-      writeFileSync(configPath, DEFAULT_CONFIG_YAML, 'utf-8');
-      console.log('Created .harness/config.yaml');
-    } else {
-      console.log('.harness/config.yaml already exists, skipping');
-    }
-
-    const guardrailsPath = join(harnessDir, 'guardrails.yaml');
-    if (!existsSync(guardrailsPath)) {
-      writeFileSync(guardrailsPath, DEFAULT_GUARDRAILS_YAML, 'utf-8');
-      console.log('Created .harness/guardrails.yaml');
-    } else {
-      console.log('.harness/guardrails.yaml already exists, skipping');
-    }
-
-    const credDir = join(harnessDir, 'credentials');
-    if (!existsSync(credDir)) {
-      mkdirSync(credDir, { recursive: true });
-    }
+    const created = initializeWorkspace(options.workspace);
+    for (const name of ['config.yaml', 'guardrails.yaml']) console.log(created.includes(name) ? `Created .harness/${name}` : `.harness/${name} already exists, skipping`);
 
     console.log('Harness project initialized successfully!');
     console.log('Next steps:');

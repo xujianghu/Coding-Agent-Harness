@@ -23,11 +23,16 @@ export interface WebConversationDetail extends WebConversation { runs: WebRun[] 
 export interface WebDirectory { path: string; entries: { name: string; path: string; kind: 'file' | 'directory'; size?: number }[]; truncated: boolean }
 export interface WebFile { path: string; content: string; size: number; sha256: string }
 export interface WebWorkspace {
+  projectId?: string;
+  initialized?: boolean;
   workspace: string;
   config: { llm: Omit<AgentConfig['llm'], 'baseUrl'>; agent: AgentConfig['agent']; memory: AgentConfig['memory']; governance: { rulesCount: number; allowedPaths: string[]; allowedCommands: string[] } };
   tools: { name: string; description: string }[];
   execution: AgentConfig['execution'];
 }
+export interface WebProject { id: string; name: string; path: string; initialized: boolean; lastOpenedAt: number }
+export interface WebProjects { activeProjectId: string; projects: WebProject[]; canSwitch: boolean; blockedReason?: string }
+export interface WebProjectDirectory { path: string; parent: string | null; entries: { name: string; path: string }[]; roots: { name: string; path: string }[]; truncated: boolean }
 export interface WebEvaluationReport {
   id: string; createdAt: number; kind: string; modes: string[];
   summary: { attempts: number; passed: number; modelAttempts: number; mockAttempts: number; modelPassed: number; mockPassed: number };

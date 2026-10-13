@@ -14,6 +14,8 @@ credentials.*
 .harness/web-runs/
 .harness/web-conversations/
 .harness/web-demo/
+.harness/web-projects.json
+.harness/web-projects.json.*.tmp
 .harness/eval-results/
 eval-results/
 coverage/
